@@ -75,13 +75,10 @@
 //! ```
 
 use std::io;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
-use std::sync::Arc;
+use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::time::Duration;
 
-use socket2::{SockAddr, Socket};
-
-use crate::{new_sender, new_socket, IPV4, IPV6, PORT};
+use crate::{new_sender, DEFAULT_PORT, IPV4, IPV6};
 
 /// A publisher for sending messages to a multicast group.
 ///
@@ -155,7 +152,7 @@ impl MulticastPublisher {
     ) -> io::Result<Self> {
         assert!(addr.is_multicast(), "Address must be a multicast address");
 
-        let port = port.unwrap_or(PORT);
+        let port = port.unwrap_or(DEFAULT_PORT);
         let addr = SocketAddr::new(addr, port);
         let socket = new_sender(&addr, interface)?;
 

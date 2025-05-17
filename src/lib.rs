@@ -1,9 +1,5 @@
-#![allow(dead_code)]
-#![allow(unused_imports)]
-#![allow(unused_variables)]
-
-#[macro_use]
-extern crate lazy_static;
+// Project: multicast-rs
+extern crate once_cell;
 extern crate socket2;
 
 // Add the modules
@@ -12,18 +8,20 @@ pub mod subscriber;
 
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Barrier};
-use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use once_cell::sync::Lazy;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 
-pub const PORT: u16 = 7645;
-lazy_static! {
-    pub static ref IPV4: IpAddr = Ipv4Addr::new(224, 0, 0, 123).into();
-    pub static ref IPV6: IpAddr = Ipv6Addr::new(0xFF02, 0, 0, 0, 0, 0, 0, 0x0123).into();
-}
+/// Default IPv4 multicast address used by the library
+pub static IPV4: Lazy<IpAddr> = Lazy::new(|| IpAddr::V4(Ipv4Addr::new(224, 0, 0, 123)));
+
+/// Default IPv6 multicast address used by the library
+pub static IPV6: Lazy<IpAddr> =
+    Lazy::new(|| IpAddr::V6(Ipv6Addr::new(0xFF02, 0, 0, 0, 0, 0, 0, 0x0123)));
+
+/// Default multicast port used by the library
+pub const DEFAULT_PORT: u16 = 7645;
 
 /// Create a new socket for multicast
 fn new_socket(addr: &SocketAddr) -> io::Result<Socket> {
