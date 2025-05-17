@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0](https://github.com/hmedkouri/multicast-rs/compare/v0.2.0...v1.0.0) (2025-05-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **subscriber:** Removed the legacy `process_raw_batch` method and replaced it with the new deserialization-based API for better performance and usability
+
+### Features
+
+* **subscriber:** implement efficient batch deserialization with form… ([f470a93](https://github.com/hmedkouri/multicast-rs/commit/f470a936427b9e664192b42ba52449cfe0e17617))
+* **subscriber:** implement efficient batch deserialization with format selection ([274d07a](https://github.com/hmedkouri/multicast-rs/commit/274d07ab8362f2f1d7e6730379da3062e556dc33))
+
+
+### Bug Fixes
+
+* **tests:** update sender socket creation to include options ([c61ce4f](https://github.com/hmedkouri/multicast-rs/commit/c61ce4fd994ef3141cdd88d2fd29a81684710740))
+
 ## [0.2.0](https://github.com/hmedkouri/multicast-rs/compare/v0.1.0...v0.2.0) (2025-05-17)
 
 
