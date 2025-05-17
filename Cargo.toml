@@ -17,6 +17,10 @@ include = [
     "LICENSE"
 ]
 
+[features]
+default = []
+stats = []
+
 [dependencies]
 once_cell = "^1.21"
 socket2 = { version = "^0.5", features = ["all"] }

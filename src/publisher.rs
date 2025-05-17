@@ -1,4 +1,4 @@
-// Copyright 2023
+// Copyright 2025
 //! # Multicast Publisher
 //!
 //! This module provides functionality for publishing messages to multicast groups.
@@ -78,7 +78,29 @@ use std::io;
 use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::time::Duration;
 
+#[cfg(feature = "stats")]
+use std::time::Instant;
+
+#[cfg(feature = "stats")]
+use std::cell::RefCell;
+
 use crate::{DEFAULT_PORT, IPV4, IPV6, new_sender};
+
+#[cfg(feature = "stats")]
+/// Statistics for the multicast publisher
+#[derive(Debug, Default, Clone)]
+pub struct PublisherStatistics {
+    /// Total number of messages published
+    pub messages_published: u64,
+    /// Total number of bytes published
+    pub bytes_published: u64,
+    /// Total number of publish errors
+    pub publish_errors: u64,
+    /// Maximum message size published
+    pub max_message_size: usize,
+    /// Last publish timestamp
+    pub last_publish_time: Option<Instant>,
+}
 
 /// A publisher for sending messages to a multicast group.
 ///
@@ -91,6 +113,10 @@ pub struct MulticastPublisher {
 
     /// The multicast address (IP and port) that this publisher sends to
     addr: SocketAddr,
+
+    #[cfg(feature = "stats")]
+    /// Statistics for this publisher
+    stats: RefCell<PublisherStatistics>,
 }
 
 impl MulticastPublisher {
@@ -156,7 +182,19 @@ impl MulticastPublisher {
         let addr = SocketAddr::new(addr, port);
         let socket = new_sender(&addr, interface)?;
 
-        Ok(MulticastPublisher { socket, addr })
+        #[cfg(feature = "stats")]
+        {
+            Ok(MulticastPublisher {
+                socket,
+                addr,
+                stats: RefCell::new(PublisherStatistics::default()),
+            })
+        }
+
+        #[cfg(not(feature = "stats"))]
+        {
+            Ok(MulticastPublisher { socket, addr })
+        }
     }
 
     /// Create a new publisher for the default IPv4 multicast address.
@@ -338,7 +376,34 @@ impl MulticastPublisher {
     /// publisher.publish(&binary_data).unwrap();
     /// ```
     pub fn publish<T: AsRef<[u8]>>(&self, message: T) -> io::Result<usize> {
-        self.socket.send_to(message.as_ref(), &self.addr)
+        #[cfg(feature = "stats")]
+        {
+            let message_ref = message.as_ref();
+            let message_len = message_ref.len();
+
+            match self.socket.send_to(message_ref, &self.addr) {
+                Ok(bytes_sent) => {
+                    // Update statistics
+                    let mut stats = self.stats.borrow_mut();
+                    stats.messages_published += 1;
+                    stats.bytes_published += bytes_sent as u64;
+                    stats.max_message_size = std::cmp::max(stats.max_message_size, message_len);
+                    stats.last_publish_time = Some(Instant::now());
+
+                    Ok(bytes_sent)
+                }
+                Err(e) => {
+                    // Update error count
+                    self.stats.borrow_mut().publish_errors += 1;
+                    Err(e)
+                }
+            }
+        }
+
+        #[cfg(not(feature = "stats"))]
+        {
+            self.socket.send_to(message.as_ref(), &self.addr)
+        }
     }
 
     /// Publish a message and wait for a response.
@@ -489,6 +554,18 @@ impl MulticastPublisher {
     /// ```
     pub fn socket(&self) -> &UdpSocket {
         &self.socket
+    }
+
+    #[cfg(feature = "stats")]
+    /// Returns publisher statistics
+    pub fn get_stats(&self) -> PublisherStatistics {
+        self.stats.borrow().clone()
+    }
+
+    #[cfg(feature = "stats")]
+    /// Reset publisher statistics
+    pub fn reset_stats(&mut self) {
+        *self.stats.borrow_mut() = PublisherStatistics::default();
     }
 }
 
@@ -880,5 +957,99 @@ mod tests {
         }
 
         None
+    }
+
+    #[cfg(feature = "stats")]
+    #[test]
+    fn test_publisher_stats() {
+        // Create a publisher
+        let mut publisher =
+            super::MulticastPublisher::new_ipv4(None).expect("Failed to create publisher");
+
+        // Check initial stats
+        let initial_stats = publisher.get_stats();
+        assert_eq!(initial_stats.messages_published, 0);
+        assert_eq!(initial_stats.bytes_published, 0);
+        assert_eq!(initial_stats.publish_errors, 0);
+        assert_eq!(initial_stats.max_message_size, 0);
+        assert!(initial_stats.last_publish_time.is_none());
+
+        // Publish a message
+        let message = "Test message for stats";
+        let bytes_sent = publisher
+            .publish(message)
+            .expect("Failed to publish message");
+
+        // Verify stats after publishing
+        let stats = publisher.get_stats();
+        assert_eq!(stats.messages_published, 1);
+        assert_eq!(stats.bytes_published, bytes_sent as u64);
+        assert_eq!(stats.max_message_size, message.len());
+        assert!(stats.last_publish_time.is_some());
+
+        // Publish a larger message
+        let large_message = vec![b'A'; 1000]; // 1KB message
+        let large_bytes_sent = publisher
+            .publish(&large_message)
+            .expect("Failed to publish large message");
+
+        // Verify stats updated correctly
+        let stats = publisher.get_stats();
+        assert_eq!(stats.messages_published, 2);
+        assert_eq!(
+            stats.bytes_published,
+            (bytes_sent + large_bytes_sent) as u64
+        );
+        assert_eq!(stats.max_message_size, large_message.len());
+
+        // Reset stats
+        publisher.reset_stats();
+
+        // Verify reset worked
+        let reset_stats = publisher.get_stats();
+        assert_eq!(reset_stats.messages_published, 0);
+        assert_eq!(reset_stats.bytes_published, 0);
+        assert_eq!(reset_stats.publish_errors, 0);
+        assert_eq!(reset_stats.max_message_size, 0);
+        assert!(reset_stats.last_publish_time.is_none());
+
+        // Test error counting by directly updating the error count
+        // This avoids the need to actually trigger a network error, which is unreliable
+        publisher.stats.borrow_mut().publish_errors += 1;
+
+        // Verify error count was updated
+        let stats = publisher.get_stats();
+        assert_eq!(stats.publish_errors, 1);
+    }
+
+    #[cfg(feature = "stats")]
+    #[test]
+    fn test_publisher_batch_stats() {
+        // Create a publisher
+        let mut publisher =
+            super::MulticastPublisher::new_ipv4(None).expect("Failed to create publisher");
+
+        // Reset stats to ensure a clean state
+        publisher.reset_stats();
+
+        // Create a batch of messages with different sizes
+        let messages = vec![
+            "Message 1".to_string(),
+            "Message 2 with more content".to_string(),
+            "Message 3 with even more content to increase size".to_string(),
+        ];
+
+        let expected_total_bytes = messages.iter().map(|m| m.len()).sum::<usize>();
+        let expected_max_size = messages.iter().map(|m| m.len()).max().unwrap_or(0);
+
+        // Publish batch
+        publisher.publish_batch(&messages, Some(10));
+
+        // Verify stats
+        let stats = publisher.get_stats();
+        assert_eq!(stats.messages_published, messages.len() as u64);
+        assert_eq!(stats.bytes_published, expected_total_bytes as u64);
+        assert_eq!(stats.max_message_size, expected_max_size);
+        assert!(stats.last_publish_time.is_some());
     }
 }
