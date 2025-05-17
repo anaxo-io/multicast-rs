@@ -974,7 +974,7 @@ mod tests {
             }
 
             // Create a sender socket
-            let socket = new_sender(&addr).expect("Failed to create sender");
+            let socket = new_sender(&addr, None).expect("Failed to create sender");
 
             // Send a test message
             socket
@@ -1060,7 +1060,7 @@ mod tests {
             }
 
             // Create a sender socket
-            let socket = new_sender(&addr).expect("Failed to create sender");
+            let socket = new_sender(&addr, None).expect("Failed to create sender");
             socket
                 .set_read_timeout(Some(Duration::from_secs(5)))
                 .expect("Failed to set timeout");
@@ -1153,7 +1153,7 @@ mod tests {
         thread::sleep(Duration::from_millis(200));
 
         // Create a sender socket
-        let socket = match new_sender(&addr) {
+        let socket = match new_sender(&addr, None) {
             Ok(s) => s,
             Err(e) => {
                 // If we can't create a sender, skip the test
@@ -1250,7 +1250,7 @@ mod tests {
             }
 
             // Create a sender socket
-            let socket = new_sender(&addr).expect("Failed to create sender");
+            let socket = new_sender(&addr, None).expect("Failed to create sender");
 
             // Send multiple test messages as JSON
             for i in 1..=message_count {
