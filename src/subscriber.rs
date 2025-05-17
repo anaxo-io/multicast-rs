@@ -869,6 +869,162 @@ impl MulticastSubscriber {
     pub fn socket(&self) -> &UdpSocket {
         &self.socket
     }
+
+    /// Receive a single message from the multicast group and deserialize it.
+    ///
+    /// Waits for a message to arrive on the multicast group, deserializes it to the specified type,
+    /// and returns the deserialized data along with the sender's address. If a timeout is specified,
+    /// the method will return an error if no message is received within the timeout period.
+    ///
+    /// # Type Parameters
+    /// * `T` - The type to deserialize the message into. Must implement `serde::de::DeserializeOwned`.
+    ///
+    /// # Arguments
+    /// * `timeout` - Optional timeout for receiving a message
+    /// * `format` - The format to use for deserialization (JSON or Bincode)
+    ///
+    /// # Returns
+    /// A Result containing the deserialized message and the sender's address, or an IO error
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use multicast_rs::subscriber::{MulticastSubscriber, DeserializeFormat};
+    /// use std::time::Duration;
+    /// use serde::Deserialize;
+    ///
+    /// #[derive(Deserialize)]
+    /// struct TradeData {
+    ///     symbol: String,
+    ///     price: f64,
+    ///     quantity: u32,
+    /// }
+    ///
+    /// let subscriber = MulticastSubscriber::new_ipv4(None, None).unwrap();
+    ///
+    /// // Receive and deserialize a JSON message with a 2 second timeout
+    /// match subscriber.receive_deserialized::<TradeData>(Some(Duration::from_secs(2)), DeserializeFormat::Json) {
+    ///     Ok((trade, addr)) => {
+    ///         println!("Received trade from {}: {} @ ${:.2} x {}",
+    ///                 addr, trade.symbol, trade.price, trade.quantity);
+    ///     },
+    ///     Err(e) => eprintln!("Error receiving message: {}", e),
+    /// }
+    /// ```
+    pub fn receive_deserialized<T: DeserializeOwned>(
+        &self,
+        timeout: Option<Duration>,
+        format: DeserializeFormat,
+    ) -> io::Result<(T, SocketAddr)> {
+        // First receive the raw data
+        let (data, addr) = self.receive(timeout)?;
+
+        // Then deserialize it according to the specified format
+        let deserialized = match format {
+            DeserializeFormat::Json => serde_json::from_slice::<T>(&data).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Failed to deserialize JSON: {}", e),
+                )
+            }),
+            DeserializeFormat::Bincode => bincode::deserialize::<T>(&data).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Failed to deserialize binary data: {}", e),
+                )
+            }),
+        }?;
+
+        Ok((deserialized, addr))
+    }
+
+    /// Receive a single message from the multicast group and deserialize it as JSON.
+    ///
+    /// This is a convenience wrapper around `receive_deserialized` that uses JSON as the default format.
+    ///
+    /// # Type Parameters
+    /// * `T` - The type to deserialize the message into. Must implement `serde::de::DeserializeOwned`.
+    ///
+    /// # Arguments
+    /// * `timeout` - Optional timeout for receiving a message
+    ///
+    /// # Returns
+    /// A Result containing the deserialized message and the sender's address, or an IO error
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use multicast_rs::subscriber::MulticastSubscriber;
+    /// use std::time::Duration;
+    /// use serde::Deserialize;
+    ///
+    /// #[derive(Deserialize)]
+    /// struct TradeData {
+    ///     symbol: String,
+    ///     price: f64,
+    ///     quantity: u32,
+    /// }
+    ///
+    /// let subscriber = MulticastSubscriber::new_ipv4(None, None).unwrap();
+    ///
+    /// // Receive and deserialize a JSON message with a 2 second timeout
+    /// match subscriber.receive_json::<TradeData>(Some(Duration::from_secs(2))) {
+    ///     Ok((trade, addr)) => {
+    ///         println!("Received trade from {}: {} @ ${:.2}", addr, trade.symbol, trade.price);
+    ///     },
+    ///     Err(e) => eprintln!("Error receiving message: {}", e),
+    /// }
+    /// ```
+    pub fn receive_json<T: DeserializeOwned>(
+        &self,
+        timeout: Option<Duration>,
+    ) -> io::Result<(T, SocketAddr)> {
+        self.receive_deserialized::<T>(timeout, DeserializeFormat::Json)
+    }
+
+    /// Receive a single message from the multicast group and deserialize it as Bincode.
+    ///
+    /// This is a convenience wrapper around `receive_deserialized` that uses Bincode as the format.
+    ///
+    /// # Type Parameters
+    /// * `T` - The type to deserialize the message into. Must implement `serde::de::DeserializeOwned`.
+    ///
+    /// # Arguments
+    /// * `timeout` - Optional timeout for receiving a message
+    ///
+    /// # Returns
+    /// A Result containing the deserialized message and the sender's address, or an IO error
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use multicast_rs::subscriber::MulticastSubscriber;
+    /// use std::time::Duration;
+    /// use serde::Deserialize;
+    ///
+    /// #[derive(Deserialize)]
+    /// struct TradeData {
+    ///     symbol: String,
+    ///     price: f64,
+    ///     quantity: u32,
+    /// }
+    ///
+    /// let subscriber = MulticastSubscriber::new_ipv4(None, None).unwrap();
+    ///
+    /// // Receive and deserialize a Bincode message with a 2 second timeout
+    /// match subscriber.receive_bincode::<TradeData>(Some(Duration::from_secs(2))) {
+    ///     Ok((trade, addr)) => {
+    ///         println!("Received trade from {}: {} @ ${:.2}", addr, trade.symbol, trade.price);
+    ///     },
+    ///     Err(e) => eprintln!("Error receiving message: {}", e),
+    /// }
+    /// ```
+    pub fn receive_bincode<T: DeserializeOwned>(
+        &self,
+        timeout: Option<Duration>,
+    ) -> io::Result<(T, SocketAddr)> {
+        self.receive_deserialized::<T>(timeout, DeserializeFormat::Bincode)
+    }
 }
 
 impl BackgroundSubscriber {
@@ -1601,5 +1757,286 @@ mod tests {
     struct TestMessage {
         message: String,
         index: usize,
+    }
+
+    #[test]
+    fn test_receive_deserialized() {
+        let port = get_unique_port();
+        let addr = SocketAddr::new(*IPV4, port);
+
+        // Create subscriber
+        let subscriber =
+            MulticastSubscriber::new_ipv4(Some(port), None).expect("Failed to create subscriber");
+
+        // Ready signal
+        let ready = Arc::new(Mutex::new(false));
+        let ready_clone = ready.clone();
+
+        // Start a thread to send a test message
+        let sender_thread = thread::spawn(move || {
+            // Wait until subscriber signals it's ready
+            let mut is_ready = false;
+            for _ in 0..20 {
+                {
+                    let r = ready_clone.lock().unwrap();
+                    is_ready = *r;
+                }
+                if is_ready {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+
+            if !is_ready {
+                panic!("Subscriber never signaled ready state");
+            }
+
+            // Create a test message
+            let test_msg = TestMessage {
+                message: "Test deserialized receive".to_string(),
+                index: 42,
+            };
+
+            // Serialize to JSON
+            let json = serde_json::to_string(&test_msg).expect("Failed to serialize test message");
+
+            // Create a sender socket
+            let socket = new_sender(&addr, None).expect("Failed to create sender");
+
+            // Send the JSON message
+            socket
+                .send_to(json.as_bytes(), &addr)
+                .expect("Failed to send message");
+        });
+
+        // Signal that we're ready to receive
+        {
+            let mut r = ready.lock().unwrap();
+            *r = true;
+        }
+
+        // Try to receive and deserialize the message with a timeout
+        match subscriber.receive_deserialized::<TestMessage>(
+            Some(Duration::from_secs(5)),
+            DeserializeFormat::Json,
+        ) {
+            Ok((data, _)) => {
+                assert_eq!(data.message, "Test deserialized receive");
+                assert_eq!(data.index, 42);
+            }
+            Err(e) => {
+                panic!("Failed to receive and deserialize message: {}", e);
+            }
+        }
+
+        // Wait for the sender thread to finish
+        sender_thread.join().unwrap();
+    }
+
+    #[test]
+    fn test_receive_json() {
+        let port = get_unique_port();
+        let addr = SocketAddr::new(*IPV4, port);
+
+        // Create subscriber
+        let subscriber =
+            MulticastSubscriber::new_ipv4(Some(port), None).expect("Failed to create subscriber");
+
+        // Ready signal
+        let ready = Arc::new(Mutex::new(false));
+        let ready_clone = ready.clone();
+
+        // Start a thread to send a test message
+        let sender_thread = thread::spawn(move || {
+            // Wait until subscriber signals it's ready
+            let mut is_ready = false;
+            for _ in 0..20 {
+                {
+                    let r = ready_clone.lock().unwrap();
+                    is_ready = *r;
+                }
+                if is_ready {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+
+            if !is_ready {
+                panic!("Subscriber never signaled ready state");
+            }
+
+            // Create a test message
+            let test_msg = TestMessage {
+                message: "Test JSON receive".to_string(),
+                index: 101,
+            };
+
+            // Serialize to JSON
+            let json = serde_json::to_string(&test_msg).expect("Failed to serialize test message");
+
+            // Create a sender socket
+            let socket = new_sender(&addr, None).expect("Failed to create sender");
+
+            // Send the JSON message
+            socket
+                .send_to(json.as_bytes(), &addr)
+                .expect("Failed to send message");
+        });
+
+        // Signal that we're ready to receive
+        {
+            let mut r = ready.lock().unwrap();
+            *r = true;
+        }
+
+        // Try to receive and deserialize the message with a timeout using the convenience method
+        match subscriber.receive_json::<TestMessage>(Some(Duration::from_secs(5))) {
+            Ok((data, _)) => {
+                assert_eq!(data.message, "Test JSON receive");
+                assert_eq!(data.index, 101);
+            }
+            Err(e) => {
+                panic!("Failed to receive and deserialize JSON message: {}", e);
+            }
+        }
+
+        // Wait for the sender thread to finish
+        sender_thread.join().unwrap();
+    }
+
+    #[test]
+    fn test_receive_bincode() {
+        let port = get_unique_port();
+        let addr = SocketAddr::new(*IPV4, port);
+
+        // Create subscriber
+        let subscriber =
+            MulticastSubscriber::new_ipv4(Some(port), None).expect("Failed to create subscriber");
+
+        // Ready signal
+        let ready = Arc::new(Mutex::new(false));
+        let ready_clone = ready.clone();
+
+        // Start a thread to send a test message
+        let sender_thread = thread::spawn(move || {
+            // Wait until subscriber signals it's ready
+            let mut is_ready = false;
+            for _ in 0..20 {
+                {
+                    let r = ready_clone.lock().unwrap();
+                    is_ready = *r;
+                }
+                if is_ready {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+
+            if !is_ready {
+                panic!("Subscriber never signaled ready state");
+            }
+
+            // Create a test message
+            let test_msg = TestMessage {
+                message: "Test Bincode receive".to_string(),
+                index: 202,
+            };
+
+            // Serialize to Bincode
+            let encoded = bincode::serialize(&test_msg).expect("Failed to serialize test message");
+
+            // Create a sender socket
+            let socket = new_sender(&addr, None).expect("Failed to create sender");
+
+            // Send the Bincode message
+            socket
+                .send_to(&encoded, &addr)
+                .expect("Failed to send message");
+        });
+
+        // Signal that we're ready to receive
+        {
+            let mut r = ready.lock().unwrap();
+            *r = true;
+        }
+
+        // Try to receive and deserialize the message with a timeout using the convenience method
+        match subscriber.receive_bincode::<TestMessage>(Some(Duration::from_secs(5))) {
+            Ok((data, _)) => {
+                assert_eq!(data.message, "Test Bincode receive");
+                assert_eq!(data.index, 202);
+            }
+            Err(e) => {
+                panic!("Failed to receive and deserialize Bincode message: {}", e);
+            }
+        }
+
+        // Wait for the sender thread to finish
+        sender_thread.join().unwrap();
+    }
+
+    #[test]
+    fn test_receive_invalid_json() {
+        let port = get_unique_port();
+        let addr = SocketAddr::new(*IPV4, port);
+
+        // Create subscriber
+        let subscriber =
+            MulticastSubscriber::new_ipv4(Some(port), None).expect("Failed to create subscriber");
+
+        // Ready signal
+        let ready = Arc::new(Mutex::new(false));
+        let ready_clone = ready.clone();
+
+        // Start a thread to send an invalid JSON message
+        let sender_thread = thread::spawn(move || {
+            // Wait until subscriber signals it's ready
+            let mut is_ready = false;
+            for _ in 0..20 {
+                {
+                    let r = ready_clone.lock().unwrap();
+                    is_ready = *r;
+                }
+                if is_ready {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+
+            if !is_ready {
+                panic!("Subscriber never signaled ready state");
+            }
+
+            // Invalid JSON
+            let invalid_json = r#"{"message": "Invalid JSON, "index": 123}"#;
+
+            // Create a sender socket
+            let socket = new_sender(&addr, None).expect("Failed to create sender");
+
+            // Send the invalid JSON message
+            socket
+                .send_to(invalid_json.as_bytes(), &addr)
+                .expect("Failed to send message");
+        });
+
+        // Signal that we're ready to receive
+        {
+            let mut r = ready.lock().unwrap();
+            *r = true;
+        }
+
+        // The deserialization should fail with an InvalidData error
+        match subscriber.receive_json::<TestMessage>(Some(Duration::from_secs(5))) {
+            Ok(_) => {
+                panic!("Expected deserialization to fail, but it succeeded");
+            }
+            Err(e) => {
+                assert_eq!(e.kind(), io::ErrorKind::InvalidData);
+                println!("Expected error received: {}", e);
+            }
+        }
+
+        // Wait for the sender thread to finish
+        sender_thread.join().unwrap();
     }
 }
