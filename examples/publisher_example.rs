@@ -20,7 +20,8 @@ fn main() {
     println!("Creating IPv4 multicast publisher...");
 
     // Create a publisher for the default IPv4 multicast address
-    let publisher = match MulticastPublisher::new_ipv4(None) {
+    // Using the new string-based API instead of requiring IpAddr
+    let publisher = match MulticastPublisher::new_str("224.0.0.123", None) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("Error creating publisher: {}", e);
@@ -37,11 +38,7 @@ fn main() {
             println!("Received response from {}: {}", addr, data_str);
         }
         Err(e) => {
-            if e.kind() == std::io::ErrorKind::WouldBlock {
-                println!("No response received within timeout period.");
-            } else {
-                eprintln!("Error receiving response: {}", e);
-            }
+            println!("No response received: {}", e);
         }
     }
 }
