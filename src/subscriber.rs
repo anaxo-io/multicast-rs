@@ -80,15 +80,13 @@
 //! ```
 
 use std::io;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
+use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use socket2::Socket;
-
-use crate::{join_multicast, new_socket, IPV4, IPV6, PORT};
+use crate::{join_multicast, new_socket, DEFAULT_PORT, IPV4, IPV6};
 
 /// A subscriber for receiving messages from a multicast group.
 ///
@@ -194,7 +192,7 @@ impl MulticastSubscriber {
     ) -> io::Result<Self> {
         assert!(addr.is_multicast(), "Address must be a multicast address");
 
-        let port = port.unwrap_or(PORT);
+        let port = port.unwrap_or(DEFAULT_PORT);
         let addr = SocketAddr::new(addr, port);
         let socket = join_multicast(addr, interface)?;
         let buffer_size = buffer_size.unwrap_or(1024);
@@ -1278,7 +1276,7 @@ mod tests {
             println!("Testing subscriber with detected interface: {}", iface);
 
             let port = get_unique_port();
-            let addr = SocketAddr::new(*IPV4, port);
+            let _addr = SocketAddr::new(*IPV4, port);
 
             // Create a publisher and subscriber using the same interface
             match (
