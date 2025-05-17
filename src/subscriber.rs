@@ -60,18 +60,28 @@
 //!
 //! ```rust,no_run
 //! use multicast_rs::subscriber::MulticastSubscriber;
+//! use serde::Deserialize;
 //! use std::time::Duration;
 //!
-//! // Create a subscriber
-//! let subscriber = MulticastSubscriber::new_ipv4(None, None).unwrap();
+//! #[derive(Deserialize, Default, Clone)]
+//! struct TradeData {
+//!     symbol: String,
+//!     price: f64,
+//!     quantity: u32,
+//! }
 //!
-//! // Process up to 10 messages with timeouts
+//! // Create a subscriber
+//! let mut subscriber = MulticastSubscriber::new_ipv4(None, None).unwrap();
+//!
+//! // Create a buffer for deserialized messages
+//! let mut trades = vec![TradeData::default(); 10];
+//!
+//! // Process up to 10 messages with a 5 second maximum processing time
 //! let processed = subscriber.process_batch(
-//!     10, // max messages to process
-//!     Some(Duration::from_millis(100)), // per-message timeout
-//!     Some(Duration::from_secs(5)), // overall timeout
+//!     &mut trades,
+//!     Some(5_000_000_000), // 5 seconds in nanoseconds
 //!     |data, addr| {
-//!         println!("Processing message from {}: {:?}", addr, data);
+//!         println!("Processing message from {}: {:?}", addr, data.symbol);
 //!         Ok(())
 //!     }
 //! ).unwrap();
@@ -84,7 +94,15 @@ use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+use serde::de::DeserializeOwned;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DeserializeFormat {
+    Json,
+    Bincode,
+}
 
 use crate::{DEFAULT_PORT, IPV4, IPV6, join_multicast, new_socket};
 
@@ -463,111 +481,145 @@ impl MulticastSubscriber {
         Ok((data, remote_addr))
     }
 
-    /// Receive multiple messages from the multicast group.
+    /// Receive multiple messages from the multicast group and deserialize them into the provided buffer.
     ///
-    /// This method attempts to receive a batch of messages from the multicast group.
-    /// It will receive up to the specified number of messages, stopping either when
-    /// that count is reached, when no more messages are available and at least one
-    /// has been received, or when the maximum wait time is exceeded.
+    /// This method attempts to receive and deserialize a batch of messages from the multicast group.
+    /// It fills the provided buffer with deserialized messages, stopping when either the buffer is full
+    /// or the maximum processing time is reached (if specified).
+    ///
+    /// # Type Parameters
+    /// * `T` - The type to deserialize messages into. Must implement `serde::de::DeserializeOwned`.
     ///
     /// # Arguments
-    /// * `count` - The number of messages to receive
-    /// * `timeout` - Optional timeout for each receive operation
-    /// * `max_wait_time` - Optional maximum total time to wait for all messages
+    /// * `buffer` - A mutable slice to store deserialized messages
+    /// * `max_processing_time_ns` - Optional maximum processing time in nanoseconds
+    /// * `format` - Specifies the serialization format (Json or Bincode)
     ///
     /// # Returns
-    /// A Result containing a vector of received messages and their sender addresses
+    /// A Result containing the number of messages successfully deserialized and placed in the buffer
     ///
     /// # Example
     ///
     /// ```rust,no_run
-    /// use multicast_rs::subscriber::MulticastSubscriber;
+    /// use multicast_rs::subscriber::{MulticastSubscriber, DeserializeFormat};
     /// use std::time::Duration;
+    /// use serde::Deserialize;
     ///
-    /// let subscriber = MulticastSubscriber::new_ipv4(None, None).unwrap();
-    ///
-    /// // Receive up to 10 messages with a per-message timeout of 200ms
-    /// // and an overall timeout of 5 seconds
-    /// match subscriber.receive_batch(
-    ///     10,
-    ///     Some(Duration::from_millis(200)),
-    ///     Some(Duration::from_secs(5))
-    /// ) {
-    ///     Ok(results) => {
-    ///         println!("Received {} messages", results.len());
-    ///         for (i, (data, addr)) in results.iter().enumerate() {
-    ///             println!("Message {}: {} bytes from {}", i+1, data.len(), addr);
-    ///         }
-    ///     },
-    ///     Err(e) => eprintln!("Error receiving batch: {}", e),
+    /// #[derive(Deserialize, Debug, Clone)]
+    /// struct TradeData {
+    ///     symbol: String,
+    ///     price: f64,
+    ///     quantity: u32,
     /// }
+    ///
+    /// let mut subscriber = MulticastSubscriber::new_ipv4(None, None).unwrap();
+    ///
+    /// // Create a buffer to hold deserialized trade data
+    /// let mut trades = vec![TradeData { symbol: String::new(), price: 0.0, quantity: 0 }; 10];
+    ///
+    /// // Receive and deserialize binary messages for up to 100ms
+    /// let count = subscriber.receive_batch_with_format(
+    ///     &mut trades,
+    ///     Some(100_000_000), // 100ms in nanoseconds
+    ///     DeserializeFormat::Bincode
+    /// ).unwrap_or(0);
+    ///
+    /// println!("Received {} trade messages", count);
     /// ```
-    pub fn receive_batch(
-        &self,
-        count: usize,
-        timeout: Option<Duration>,
-        max_wait_time: Option<Duration>,
-    ) -> io::Result<Vec<(Vec<u8>, SocketAddr)>> {
-        // Set timeout if provided for individual messages
-        if let Some(duration) = timeout {
-            self.socket.set_read_timeout(Some(duration))?;
+    pub fn receive_batch_with_format<T: DeserializeOwned>(
+        &mut self,
+        buffer: &mut [T],
+        max_processing_time_ns: Option<u64>,
+        format: DeserializeFormat,
+    ) -> Result<usize, io::Error> {
+        // Don't process if the buffer is empty
+        if buffer.is_empty() {
+            return Ok(0);
         }
 
-        let start_time = std::time::Instant::now();
-        let mut results = Vec::with_capacity(count);
-        let mut buf = vec![0u8; self.buffer_size];
+        let mut temp_buffer = vec![0u8; self.buffer_size];
+        let mut processed = 0;
+        let start_time = Instant::now();
 
-        for _ in 0..count {
-            // Check if we've exceeded max wait time
-            if let Some(max_time) = max_wait_time {
-                if start_time.elapsed() > max_time {
+        // Set a short timeout for each receive operation
+        //self.socket
+        //    .set_read_timeout(Some(Duration::from_millis(10)))?;
+
+        while processed < buffer.len() {
+            // Check if we've exceeded max processing time
+            if let Some(max_time) = max_processing_time_ns {
+                let elapsed = start_time.elapsed();
+                let elapsed_ns = elapsed.as_secs() * 1_000_000_000 + elapsed.subsec_nanos() as u64;
+                if elapsed_ns >= max_time {
                     break;
                 }
             }
 
-            match self.socket.recv_from(&mut buf) {
-                Ok((size, addr)) => {
-                    // Create a copy of just the received data
-                    let msg_data = buf[..size].to_vec();
-                    results.push((msg_data, addr));
+            // Try to receive a message
+            match self.socket.recv_from(&mut temp_buffer) {
+                Ok((size, _addr)) => {
+                    // Try to deserialize the message based on the specified format
+                    let result = match format {
+                        DeserializeFormat::Json => {
+                            serde_json::from_slice::<T>(&temp_buffer[..size]).map_err(|e| {
+                                io::Error::new(
+                                    io::ErrorKind::InvalidData,
+                                    format!("Failed to deserialize JSON: {}", e),
+                                )
+                            })
+                        }
+                        DeserializeFormat::Bincode => {
+                            bincode::deserialize::<T>(&temp_buffer[..size]).map_err(|e| {
+                                io::Error::new(
+                                    io::ErrorKind::InvalidData,
+                                    format!("Failed to deserialize binary data: {}", e),
+                                )
+                            })
+                        }
+                    };
+
+                    match result {
+                        Ok(deserialized) => {
+                            // Store the deserialized message in the buffer
+                            buffer[processed] = deserialized;
+                            processed += 1;
+                        }
+                        Err(e) => return Err(e),
+                    }
+                }
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    // Timeout reached, just continue to the next iteration or break if we've processed some messages
+                    if processed > 0 {
+                        break;
+                    }
+
+                    // Small sleep to prevent tight CPU loop
+                    thread::sleep(Duration::from_millis(1));
                 }
                 Err(e) => {
-                    // If we get a timeout and have at least one message, we can return
-                    if e.kind() == io::ErrorKind::WouldBlock && !results.is_empty() {
-                        break;
-                    } else {
-                        return Err(e);
-                    }
+                    // Return other errors
+                    return Err(e);
                 }
             }
         }
 
-        // If we didn't get any messages and max_wait_time is provided
-        // and we've waited at least that long, return a timeout error
-        if results.is_empty()
-            && max_wait_time.is_some()
-            && start_time.elapsed() >= max_wait_time.unwrap()
-        {
-            return Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "Timed out waiting for batch messages",
-            ));
-        }
-
-        Ok(results)
+        Ok(processed)
     }
 
     /// Process a batch of received messages with a handler function.
     ///
-    /// This method is similar to `receive_batch` but applies a handler function
-    /// to each received message. This allows for direct processing of messages
-    /// as they are received, without needing to store them all in memory first.
+    /// This method receives and deserializes a batch of messages from the multicast group,
+    /// and then processes each message with a handler function. It leverages the
+    /// efficient `receive_batch` method with automatic deserialization.
+    ///
+    /// # Type Parameters
+    /// * `T` - The type to deserialize messages into. Must implement `serde::de::DeserializeOwned`.
     ///
     /// # Arguments
-    /// * `count` - The maximum number of messages to receive and process
-    /// * `timeout` - Optional timeout for each receive operation
-    /// * `max_wait_time` - Optional maximum total time to wait for all messages
-    /// * `handler` - Function to process each message
+    /// * `buffer` - A mutable slice to store deserialized messages
+    /// * `max_processing_time_ns` - Optional maximum processing time in nanoseconds
+    /// * `format` - Serialization format to use (defaults to JSON if None)
+    /// * `handler` - Function to process each deserialized message
     ///
     /// # Returns
     /// A Result containing the number of messages processed
@@ -575,51 +627,117 @@ impl MulticastSubscriber {
     /// # Example
     ///
     /// ```rust,no_run
-    /// use multicast_rs::subscriber::MulticastSubscriber;
+    /// use multicast_rs::subscriber::{MulticastSubscriber, DeserializeFormat};
+    /// use serde::Deserialize;
     /// use std::time::Duration;
-    /// use std::collections::HashMap;
-    /// use std::sync::{Arc, Mutex};
     ///
-    /// // Create a shared counter for message statistics
-    /// let message_stats = Arc::new(Mutex::new(HashMap::new()));
-    /// let stats_clone = message_stats.clone();
+    /// #[derive(Deserialize, Default, Clone)]
+    /// struct TradeData {
+    ///     symbol: String,
+    ///     price: f64,
+    ///     quantity: u32,
+    /// }
     ///
-    /// let subscriber = MulticastSubscriber::new_ipv4(None, None).unwrap();
+    /// let mut subscriber = MulticastSubscriber::new_ipv4(None, None).unwrap();
     ///
-    /// // Process up to 20 messages, tracking stats by sender
-    /// let processed = subscriber.process_batch(
-    ///     20,
-    ///     Some(Duration::from_millis(100)),
-    ///     Some(Duration::from_secs(5)),
-    ///     move |data, addr| {
-    ///         let mut stats = stats_clone.lock().unwrap();
-    ///         let counter = stats.entry(addr).or_insert(0);
-    ///         *counter += 1;
+    /// // Create a buffer for deserialized messages
+    /// let mut trades = vec![TradeData::default(); 20];
+    ///
+    /// // Process up to 20 binary messages, with max 5s processing time
+    /// let processed = subscriber.process_batch_with_format(
+    ///     &mut trades,
+    ///     Some(5_000_000_000), // 5 seconds
+    ///     Some(DeserializeFormat::Bincode),
+    ///     |trade, _addr| {
+    ///         println!("Processed trade for {} at ${}", trade.symbol, trade.price);
     ///         Ok(())
     ///     }
     /// ).unwrap_or(0);
     ///
-    /// println!("Processed {} messages", processed);
+    /// println!("Processed {} trades", processed);
     /// ```
-    pub fn process_batch<F>(
-        &self,
-        count: usize,
-        timeout: Option<Duration>,
-        max_wait_time: Option<Duration>,
+    pub fn process_batch_with_format<T, F>(
+        &mut self,
+        buffer: &mut [T],
+        max_processing_time_ns: Option<u64>,
+        format: Option<DeserializeFormat>,
         mut handler: F,
     ) -> io::Result<usize>
     where
-        F: FnMut(&[u8], SocketAddr) -> io::Result<()>,
+        T: DeserializeOwned + Default,
+        F: FnMut(&T, SocketAddr) -> io::Result<()>,
     {
-        let messages = self.receive_batch(count, timeout, max_wait_time)?;
+        // Use JSON as the default format if none specified
+        let format = format.unwrap_or(DeserializeFormat::Json);
+
+        // Get the sender's address before we start processing
+        let addr = self.address();
+
+        // Receive and deserialize the batch of messages
+        let received = self.receive_batch_with_format(buffer, max_processing_time_ns, format)?;
 
         let mut processed = 0;
-        for (data, addr) in &messages {
-            handler(data, *addr)?;
+        // Process each received message with the handler
+        for i in 0..received {
+            handler(&buffer[i], addr)?;
             processed += 1;
         }
 
         Ok(processed)
+    }
+
+    /// Process a batch of received messages with a handler function using JSON format.
+    ///
+    /// This is a convenience wrapper around `process_batch_with_format` that uses JSON
+    /// as the default serialization format.
+    ///
+    /// # Type Parameters
+    /// * `T` - The type to deserialize messages into. Must implement `serde::de::DeserializeOwned`.
+    ///
+    /// # Arguments
+    /// * `buffer` - A mutable slice to store deserialized messages
+    /// * `max_processing_time_ns` - Optional maximum processing time in nanoseconds
+    /// * `handler` - Function to process each deserialized message
+    ///
+    /// # Returns
+    /// A Result containing the number of messages processed
+    pub fn process_batch<T, F>(
+        &mut self,
+        buffer: &mut [T],
+        max_processing_time_ns: Option<u64>,
+        handler: F,
+    ) -> io::Result<usize>
+    where
+        T: DeserializeOwned + Default,
+        F: FnMut(&T, SocketAddr) -> io::Result<()>,
+    {
+        self.process_batch_with_format(buffer, max_processing_time_ns, None, handler)
+    }
+
+    /// Receive multiple messages from the multicast group and deserialize them into the provided buffer.
+    ///
+    /// This method attempts to receive and deserialize a batch of messages from the multicast group
+    /// using JSON format by default. It fills the provided buffer with deserialized messages, stopping
+    /// when either the buffer is full or the maximum processing time is reached (if specified).
+    ///
+    /// For performance-critical applications, consider using `receive_batch_with_format` with
+    /// `DeserializeFormat::Bincode` instead.
+    ///
+    /// # Type Parameters
+    /// * `T` - The type to deserialize messages into. Must implement `serde::de::DeserializeOwned`.
+    ///
+    /// # Arguments
+    /// * `buffer` - A mutable slice to store deserialized messages
+    /// * `max_processing_time_ns` - Optional maximum processing time in nanoseconds
+    ///
+    /// # Returns
+    /// A Result containing the number of messages successfully deserialized and placed in the buffer
+    pub fn receive_batch<T: DeserializeOwned>(
+        &mut self,
+        buffer: &mut [T],
+        max_processing_time_ns: Option<u64>,
+    ) -> Result<usize, io::Error> {
+        self.receive_batch_with_format(buffer, max_processing_time_ns, DeserializeFormat::Json)
     }
 
     /// Start listening for multicast messages in the background.
@@ -807,6 +925,8 @@ impl Drop for BackgroundSubscriber {
 
 #[cfg(test)]
 mod tests {
+    use serde::{Deserialize, Serialize};
+
     use super::*;
     use crate::new_sender;
     use crate::publisher::MulticastPublisher;
@@ -854,7 +974,7 @@ mod tests {
             }
 
             // Create a sender socket
-            let socket = new_sender(&addr, None).expect("Failed to create sender");
+            let socket = new_sender(&addr).expect("Failed to create sender");
 
             // Send a test message
             socket
@@ -940,7 +1060,7 @@ mod tests {
             }
 
             // Create a sender socket
-            let socket = new_sender(&addr, None).expect("Failed to create sender");
+            let socket = new_sender(&addr).expect("Failed to create sender");
             socket
                 .set_read_timeout(Some(Duration::from_secs(5)))
                 .expect("Failed to set timeout");
@@ -1033,7 +1153,7 @@ mod tests {
         thread::sleep(Duration::from_millis(200));
 
         // Create a sender socket
-        let socket = match new_sender(&addr, None) {
+        let socket = match new_sender(&addr) {
             Ok(s) => s,
             Err(e) => {
                 // If we can't create a sender, skip the test
@@ -1091,103 +1211,12 @@ mod tests {
     }
 
     #[test]
-    fn test_receive_batch() {
-        let port = get_unique_port();
-        let addr = SocketAddr::new(*IPV4, port);
-
-        // Create subscriber
-        let subscriber =
-            MulticastSubscriber::new_ipv4(Some(port), None).expect("Failed to create subscriber");
-
-        // Ready signal
-        let ready = Arc::new(Mutex::new(false));
-        let ready_clone = ready.clone();
-
-        // Number of messages to send and receive
-        let message_count = 5;
-
-        // Start a thread to send test messages
-        let sender_thread = thread::spawn(move || {
-            // Wait until subscriber signals it's ready
-            let mut is_ready = false;
-            for _ in 0..20 {
-                {
-                    let r = ready_clone.lock().unwrap();
-                    is_ready = *r;
-                }
-                if is_ready {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(50));
-            }
-
-            if !is_ready {
-                panic!("Subscriber never signaled ready state");
-            }
-
-            // Create a sender socket
-            let socket = new_sender(&addr, None).expect("Failed to create sender");
-
-            // Send multiple test messages
-            for i in 1..=message_count {
-                let message = format!("Batch message {}", i);
-                socket
-                    .send_to(message.as_bytes(), &addr)
-                    .expect("Failed to send message");
-
-                // Add delay between messages
-                thread::sleep(Duration::from_millis(20));
-            }
-        });
-
-        // Signal that we're ready to receive
-        {
-            let mut r = ready.lock().unwrap();
-            *r = true;
-        }
-
-        // Try to receive the batch of messages
-        match subscriber.receive_batch(
-            message_count,
-            Some(Duration::from_millis(200)),
-            Some(Duration::from_secs(5)),
-        ) {
-            Ok(results) => {
-                // Check that we received the expected number of messages
-                assert_eq!(results.len(), message_count);
-
-                // Convert received messages to strings for easier verification
-                let received_messages: Vec<String> = results
-                    .iter()
-                    .map(|(data, _)| String::from_utf8_lossy(data).to_string())
-                    .collect();
-
-                // Check that each expected message was received
-                for i in 1..=message_count {
-                    let expected = format!("Batch message {}", i);
-                    assert!(
-                        received_messages.contains(&expected),
-                        "Missing message: {}",
-                        expected
-                    );
-                }
-            }
-            Err(e) => {
-                panic!("Failed to receive batch: {}", e);
-            }
-        }
-
-        // Wait for the sender thread to finish
-        sender_thread.join().unwrap();
-    }
-
-    #[test]
     fn test_process_batch() {
         let port = get_unique_port();
         let addr = SocketAddr::new(*IPV4, port);
 
         // Create subscriber
-        let subscriber =
+        let mut subscriber =
             MulticastSubscriber::new_ipv4(Some(port), None).expect("Failed to create subscriber");
 
         // Ready signal
@@ -1221,13 +1250,21 @@ mod tests {
             }
 
             // Create a sender socket
-            let socket = new_sender(&addr, None).expect("Failed to create sender");
+            let socket = new_sender(&addr).expect("Failed to create sender");
 
-            // Send multiple test messages
+            // Send multiple test messages as JSON
             for i in 1..=message_count {
-                let message = format!("Process batch message {}", i);
+                let test_msg = TestMessage {
+                    message: format!("Process batch message {}", i),
+                    index: i,
+                };
+
+                // Serialize to JSON
+                let json =
+                    serde_json::to_string(&test_msg).expect("Failed to serialize test message");
+
                 socket
-                    .send_to(message.as_bytes(), &addr)
+                    .send_to(json.as_bytes(), &addr)
                     .expect("Failed to send message");
 
                 // Add delay between messages
@@ -1241,16 +1278,17 @@ mod tests {
             *r = true;
         }
 
-        // Process the batch of messages
+        // Create a buffer for deserialized messages
+        let mut test_messages = vec![TestMessage::default(); message_count];
+
+        // Process the batch of messages with the new API
         let processed = subscriber
             .process_batch(
-                message_count,
-                Some(Duration::from_millis(200)),
-                Some(Duration::from_secs(5)),
-                |data, _addr| {
-                    let message = String::from_utf8_lossy(data).to_string();
+                &mut test_messages,
+                Some(5_000_000_000), // 5 seconds in nanoseconds
+                |msg, _addr| {
                     let mut messages = received_messages_clone.lock().unwrap();
-                    messages.push(message);
+                    messages.push(msg.message.clone());
                     Ok(())
                 },
             )
@@ -1270,6 +1308,16 @@ mod tests {
                 messages.contains(&expected),
                 "Missing message: {}",
                 expected
+            );
+        }
+
+        // Check that the indices are correct in the deserialized messages
+        for i in 1..=message_count {
+            let expected_index = i;
+            assert!(
+                test_messages.iter().any(|m| m.index == expected_index),
+                "Message with index {} not found in deserialized results",
+                expected_index
             );
         }
 
@@ -1364,7 +1412,7 @@ mod tests {
 
                         // Try to receive the message with a timeout
                         match subscriber.receive(Some(Duration::from_secs(3))) {
-                            Ok((data, _)) => {
+                            Ok((data, _addr)) => {
                                 let message = String::from_utf8_lossy(&data);
                                 assert_eq!(test_message, message);
                                 true
@@ -1547,5 +1595,11 @@ mod tests {
         }
 
         None
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+    struct TestMessage {
+        message: String,
+        index: usize,
     }
 }
