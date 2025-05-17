@@ -81,12 +81,12 @@
 
 use std::io;
 use std::net::{IpAddr, SocketAddr, UdpSocket};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use crate::{join_multicast, new_socket, DEFAULT_PORT, IPV4, IPV6};
+use crate::{DEFAULT_PORT, IPV4, IPV6, join_multicast, new_socket};
 
 /// A subscriber for receiving messages from a multicast group.
 ///
@@ -309,6 +309,68 @@ impl MulticastSubscriber {
         buffer_size: Option<usize>,
     ) -> io::Result<Self> {
         Self::new_with_interface(*IPV6, port, interface, buffer_size)
+    }
+
+    /// Create a new subscriber for the given multicast address specified as a string.
+    ///
+    /// # Arguments
+    /// * `addr` - The multicast address as a string (e.g. "224.0.0.123" for IPv4 or "ff02::123" for IPv6)
+    /// * `port` - The port to subscribe on (defaults to 7645 if None)
+    /// * `buffer_size` - The size of the receive buffer (defaults to 1024 if None)
+    ///
+    /// # Returns
+    /// A Result containing the new MulticastSubscriber or an IO error
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use multicast_rs::subscriber::MulticastSubscriber;
+    ///
+    /// // Create a subscriber for a specific multicast address
+    /// let subscriber = MulticastSubscriber::new_str("224.0.0.123", Some(8000), Some(2048)).unwrap();
+    /// ```
+    pub fn new_str(addr: &str, port: Option<u16>, buffer_size: Option<usize>) -> io::Result<Self> {
+        match addr.parse::<IpAddr>() {
+            Ok(ip_addr) => Self::new(ip_addr, port, buffer_size),
+            Err(e) => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("Invalid IP address: {}", e),
+            )),
+        }
+    }
+
+    /// Create a new subscriber for the given multicast address as a string on a specific network interface.
+    ///
+    /// # Arguments
+    /// * `addr` - The multicast address as a string (e.g. "224.0.0.123" for IPv4 or "ff02::123" for IPv6)
+    /// * `port` - The port to subscribe on (defaults to 7645 if None)
+    /// * `interface` - The network interface name or IP address to use (e.g., "eth0", "192.168.1.5")
+    /// * `buffer_size` - The size of the receive buffer (defaults to 1024 if None)
+    ///
+    /// # Returns
+    /// A Result containing the new MulticastSubscriber or an IO error
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use multicast_rs::subscriber::MulticastSubscriber;
+    ///
+    /// // Create a subscriber for a specific multicast address on eth0 interface
+    /// let subscriber = MulticastSubscriber::new_str_with_interface("224.0.0.123", Some(8000), Some("eth0"), Some(2048)).unwrap();
+    /// ```
+    pub fn new_str_with_interface(
+        addr: &str,
+        port: Option<u16>,
+        interface: Option<&str>,
+        buffer_size: Option<usize>,
+    ) -> io::Result<Self> {
+        match addr.parse::<IpAddr>() {
+            Ok(ip_addr) => Self::new_with_interface(ip_addr, port, interface, buffer_size),
+            Err(e) => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("Invalid IP address: {}", e),
+            )),
+        }
     }
 
     /// Receive a single message from the multicast group.
@@ -1351,7 +1413,10 @@ mod tests {
                     match receiver_thread.join() {
                         Ok(received) => {
                             if !received {
-                                println!("Test communication on interface {} did not succeed - this might be expected", thread_iface);
+                                println!(
+                                    "Test communication on interface {} did not succeed - this might be expected",
+                                    thread_iface
+                                );
                             }
                         }
                         Err(_) => {
@@ -1442,7 +1507,9 @@ mod tests {
                         if received {
                             println!("Successfully communicated over loopback interface");
                         } else {
-                            println!("Loopback communication failed - this may be normal on some systems");
+                            println!(
+                                "Loopback communication failed - this may be normal on some systems"
+                            );
                         }
                     }
                     Err(_) => println!("Receiver thread panicked"),

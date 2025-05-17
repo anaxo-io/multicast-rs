@@ -21,7 +21,8 @@ fn main() {
     println!("Creating IPv4 multicast subscriber...");
 
     // Create a subscriber for the default IPv4 multicast address
-    let subscriber = match MulticastSubscriber::new_ipv4(None, None) {
+    // Using the new string-based API instead of requiring IpAddr
+    let subscriber = match MulticastSubscriber::new_str("224.0.0.123", None, None) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Error creating subscriber: {}", e);

@@ -78,7 +78,7 @@ use std::io;
 use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::time::Duration;
 
-use crate::{new_sender, DEFAULT_PORT, IPV4, IPV6};
+use crate::{DEFAULT_PORT, IPV4, IPV6, new_sender};
 
 /// A publisher for sending messages to a multicast group.
 ///
@@ -251,6 +251,65 @@ impl MulticastPublisher {
     /// ```
     pub fn new_ipv6_with_interface(port: Option<u16>, interface: Option<&str>) -> io::Result<Self> {
         Self::new_with_interface(*IPV6, port, interface)
+    }
+
+    /// Create a new publisher for the given multicast address specified as a string.
+    ///
+    /// # Arguments
+    /// * `addr` - The multicast address as a string (e.g. "224.0.0.123" for IPv4 or "ff02::123" for IPv6)
+    /// * `port` - The port to publish on (defaults to 7645 if None)
+    ///
+    /// # Returns
+    /// A Result containing the new MulticastPublisher or an IO error
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use multicast_rs::publisher::MulticastPublisher;
+    ///
+    /// // Create a publisher for a specific multicast address
+    /// let publisher = MulticastPublisher::new_str("224.0.0.123", Some(8000)).unwrap();
+    /// ```
+    pub fn new_str(addr: &str, port: Option<u16>) -> io::Result<Self> {
+        match addr.parse::<IpAddr>() {
+            Ok(ip_addr) => Self::new(ip_addr, port),
+            Err(e) => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("Invalid IP address: {}", e),
+            )),
+        }
+    }
+
+    /// Create a new publisher for the given multicast address as a string on a specific network interface.
+    ///
+    /// # Arguments
+    /// * `addr` - The multicast address as a string (e.g. "224.0.0.123" for IPv4 or "ff02::123" for IPv6)
+    /// * `port` - The port to publish on (defaults to 7645 if None)
+    /// * `interface` - The network interface name or IP address to use (e.g., "eth0", "192.168.1.5")
+    ///
+    /// # Returns
+    /// A Result containing the new MulticastPublisher or an IO error
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use multicast_rs::publisher::MulticastPublisher;
+    ///
+    /// // Create a publisher for a specific multicast address on eth0 interface
+    /// let publisher = MulticastPublisher::new_str_with_interface("224.0.0.123", Some(8000), Some("eth0")).unwrap();
+    /// ```
+    pub fn new_str_with_interface(
+        addr: &str,
+        port: Option<u16>,
+        interface: Option<&str>,
+    ) -> io::Result<Self> {
+        match addr.parse::<IpAddr>() {
+            Ok(ip_addr) => Self::new_with_interface(ip_addr, port, interface),
+            Err(e) => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("Invalid IP address: {}", e),
+            )),
+        }
     }
 
     /// Publish a message to the multicast group.
