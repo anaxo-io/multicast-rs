@@ -394,46 +394,82 @@ impl MulticastSubscriber {
     /// Receive a single message from the multicast group.
     ///
     /// Waits for a message to arrive on the multicast group and returns its content
-    /// and the sender's address. If a timeout is specified, the method will return
-    /// an error if no message is received within the timeout period.
+    /// and the sender's address.
     ///
     /// # Arguments
-    /// * `timeout` - Optional timeout for receiving a message
+    /// * `timeout` - Optional timeout for receiving a message:
+    ///   - `Some(duration)`: Wait up to the specified duration for data
+    ///   - `None`: Non-blocking mode, returns immediately with WouldBlock error if no data available
     ///
     /// # Returns
-    /// A Result containing the message data and the sender's address, or an IO error
+    /// A Result containing the message data and the sender's address, or an IO error.
+    /// In non-blocking mode (timeout: None), may return ErrorKind::WouldBlock if no data is available.
     ///
     /// # Example
     ///
     /// ```rust,no_run
     /// use multicast_rs::subscriber::MulticastSubscriber;
     /// use std::time::Duration;
+    /// use std::io::ErrorKind;
     ///
     /// let subscriber = MulticastSubscriber::new_ipv4(None, None).unwrap();
     ///
-    /// // Receive a message with a 2 second timeout
+    /// // Blocking receive with timeout
     /// match subscriber.receive(Some(Duration::from_secs(2))) {
     ///     Ok((data, addr)) => {
     ///         println!("Received {} bytes from {}", data.len(), addr);
-    ///         println!("Message: {}", String::from_utf8_lossy(&data));
     ///     },
-    ///     Err(e) => eprintln!("No message received: {}", e),
+    ///     Err(e) => eprintln!("Error or timeout: {}", e),
+    /// }
+    ///
+    /// // Non-blocking receive
+    /// match subscriber.receive(None) {
+    ///     Ok((data, addr)) => {
+    ///         println!("Received {} bytes from {}", data.len(), addr);
+    ///     },
+    ///     Err(e) if e.kind() == ErrorKind::WouldBlock => {
+    ///         println!("No data available right now");
+    ///     },
+    ///     Err(e) => eprintln!("Unexpected error: {}", e),
     /// }
     /// ```
     pub fn receive(&self, timeout: Option<Duration>) -> io::Result<(Vec<u8>, SocketAddr)> {
-        // Set timeout if provided
-        if let Some(duration) = timeout {
-            self.socket.set_read_timeout(Some(duration))?;
+        match timeout {
+            Some(duration) => {
+                // Set socket to blocking with the specified timeout
+                self.socket.set_nonblocking(false)?;
+                self.socket.set_read_timeout(Some(duration))?;
+            }
+            None => {
+                // None means non-blocking
+                self.socket.set_nonblocking(true)?;
+            }
         }
 
-        // Prepare to receive the message
+        // Receive data from the socket
         let mut buf = vec![0u8; self.buffer_size];
-        let (size, addr) = self.socket.recv_from(&mut buf)?;
+        match self.socket.recv_from(&mut buf) {
+            Ok((size, addr)) => {
+                buf.truncate(size);
 
-        // Resize buffer to actual data size
-        buf.truncate(size);
+                // Reset socket to blocking mode if we were in non-blocking mode
+                if timeout.is_none() {
+                    // Best effort to reset; ignore errors during cleanup
+                    let _ = self.socket.set_nonblocking(false);
+                }
 
-        Ok((buf, addr))
+                Ok((buf, addr))
+            }
+            Err(e) => {
+                // Reset socket to blocking mode if we were in non-blocking mode
+                if timeout.is_none() {
+                    // Best effort to reset; ignore errors during cleanup
+                    let _ = self.socket.set_nonblocking(false);
+                }
+
+                Err(e)
+            }
+        }
     }
 
     /// Receive a message and send a response.
@@ -443,26 +479,41 @@ impl MulticastSubscriber {
     /// request-response patterns in multicast communication.
     ///
     /// # Arguments
-    /// * `timeout` - Optional timeout for receiving a message
+    /// * `timeout` - Optional timeout for receiving a message:
+    ///   - `Some(duration)`: Wait up to the specified duration for data
+    ///   - `None`: Non-blocking mode, returns immediately with WouldBlock error if no data available
     /// * `response` - The response to send back to the sender
     ///
     /// # Returns
-    /// A Result containing the received message data and the sender's address, or an IO error
+    /// A Result containing the received message data and the sender's address, or an IO error.
+    /// In non-blocking mode (timeout: None), may return ErrorKind::WouldBlock if no data is available.
     ///
     /// # Example
     ///
     /// ```rust,no_run
     /// use multicast_rs::subscriber::MulticastSubscriber;
     /// use std::time::Duration;
+    /// use std::io::ErrorKind;
     ///
     /// let subscriber = MulticastSubscriber::new_ipv4(None, None).unwrap();
     ///
-    /// // Receive a message and respond with an acknowledgment
+    /// // Blocking receive with timeout
     /// match subscriber.receive_and_respond(Some(Duration::from_secs(2)), "ACK") {
     ///     Ok((data, addr)) => {
     ///         println!("Received from {} and sent ACK: {}", addr, String::from_utf8_lossy(&data));
     ///     },
-    ///     Err(e) => eprintln!("Error: {}", e),
+    ///     Err(e) => eprintln!("Error or timeout: {}", e),
+    /// }
+    ///
+    /// // Non-blocking receive
+    /// match subscriber.receive_and_respond(None, "ACK") {
+    ///     Ok((data, addr)) => {
+    ///         println!("Received from {} and sent ACK: {}", addr, String::from_utf8_lossy(&data));
+    ///     },
+    ///     Err(e) if e.kind() == ErrorKind::WouldBlock => {
+    ///         println!("No data available right now");
+    ///     },
+    ///     Err(e) => eprintln!("Unexpected error: {}", e),
     /// }
     /// ```
     pub fn receive_and_respond<T: AsRef<[u8]>>(
@@ -880,17 +931,21 @@ impl MulticastSubscriber {
     /// * `T` - The type to deserialize the message into. Must implement `serde::de::DeserializeOwned`.
     ///
     /// # Arguments
-    /// * `timeout` - Optional timeout for receiving a message
+    /// * `timeout` - Optional timeout for receiving a message:
+    ///   - `Some(duration)`: Wait up to the specified duration for data
+    ///   - `None`: Non-blocking mode, returns immediately with WouldBlock error if no data available
     /// * `format` - The format to use for deserialization (JSON or Bincode)
     ///
     /// # Returns
-    /// A Result containing the deserialized message and the sender's address, or an IO error
+    /// A Result containing the deserialized message and the sender's address, or an IO error.
+    /// In non-blocking mode (timeout: None), may return ErrorKind::WouldBlock if no data is available.
     ///
     /// # Example
     ///
     /// ```rust,no_run
     /// use multicast_rs::subscriber::{MulticastSubscriber, DeserializeFormat};
     /// use std::time::Duration;
+    /// use std::io::ErrorKind;
     /// use serde::Deserialize;
     ///
     /// #[derive(Deserialize)]
@@ -902,13 +957,24 @@ impl MulticastSubscriber {
     ///
     /// let subscriber = MulticastSubscriber::new_ipv4(None, None).unwrap();
     ///
-    /// // Receive and deserialize a JSON message with a 2 second timeout
+    /// // Blocking receive with timeout
     /// match subscriber.receive_deserialized::<TradeData>(Some(Duration::from_secs(2)), DeserializeFormat::Json) {
     ///     Ok((trade, addr)) => {
     ///         println!("Received trade from {}: {} @ ${:.2} x {}",
     ///                 addr, trade.symbol, trade.price, trade.quantity);
     ///     },
-    ///     Err(e) => eprintln!("Error receiving message: {}", e),
+    ///     Err(e) => eprintln!("Error or timeout: {}", e),
+    /// }
+    ///
+    /// // Non-blocking receive
+    /// match subscriber.receive_deserialized::<TradeData>(None, DeserializeFormat::Json) {
+    ///     Ok((trade, addr)) => {
+    ///         println!("Received trade from {}: {} @ ${:.2}", addr, trade.symbol, trade.price);
+    ///     },
+    ///     Err(e) if e.kind() == ErrorKind::WouldBlock => {
+    ///         println!("No data available right now");
+    ///     },
+    ///     Err(e) => eprintln!("Unexpected error: {}", e),
     /// }
     /// ```
     pub fn receive_deserialized<T: DeserializeOwned>(
@@ -946,16 +1012,20 @@ impl MulticastSubscriber {
     /// * `T` - The type to deserialize the message into. Must implement `serde::de::DeserializeOwned`.
     ///
     /// # Arguments
-    /// * `timeout` - Optional timeout for receiving a message
+    /// * `timeout` - Optional timeout for receiving a message:
+    ///   - `Some(duration)`: Wait up to the specified duration for data
+    ///   - `None`: Non-blocking mode, returns immediately with WouldBlock error if no data available
     ///
     /// # Returns
-    /// A Result containing the deserialized message and the sender's address, or an IO error
+    /// A Result containing the deserialized message and the sender's address, or an IO error.
+    /// In non-blocking mode (timeout: None), may return ErrorKind::WouldBlock if no data is available.
     ///
     /// # Example
     ///
     /// ```rust,no_run
     /// use multicast_rs::subscriber::MulticastSubscriber;
     /// use std::time::Duration;
+    /// use std::io::ErrorKind;
     /// use serde::Deserialize;
     ///
     /// #[derive(Deserialize)]
@@ -967,12 +1037,23 @@ impl MulticastSubscriber {
     ///
     /// let subscriber = MulticastSubscriber::new_ipv4(None, None).unwrap();
     ///
-    /// // Receive and deserialize a JSON message with a 2 second timeout
+    /// // Blocking receive with timeout
     /// match subscriber.receive_json::<TradeData>(Some(Duration::from_secs(2))) {
     ///     Ok((trade, addr)) => {
     ///         println!("Received trade from {}: {} @ ${:.2}", addr, trade.symbol, trade.price);
     ///     },
-    ///     Err(e) => eprintln!("Error receiving message: {}", e),
+    ///     Err(e) => eprintln!("Error or timeout: {}", e),
+    /// }
+    ///
+    /// // Non-blocking receive
+    /// match subscriber.receive_json::<TradeData>(None) {
+    ///     Ok((trade, addr)) => {
+    ///         println!("Received trade from {}: {} @ ${:.2}", addr, trade.symbol, trade.price);
+    ///     },
+    ///     Err(e) if e.kind() == ErrorKind::WouldBlock => {
+    ///         println!("No data available right now");
+    ///     },
+    ///     Err(e) => eprintln!("Unexpected error: {}", e),
     /// }
     /// ```
     pub fn receive_json<T: DeserializeOwned>(
@@ -990,16 +1071,20 @@ impl MulticastSubscriber {
     /// * `T` - The type to deserialize the message into. Must implement `serde::de::DeserializeOwned`.
     ///
     /// # Arguments
-    /// * `timeout` - Optional timeout for receiving a message
+    /// * `timeout` - Optional timeout for receiving a message:
+    ///   - `Some(duration)`: Wait up to the specified duration for data
+    ///   - `None`: Non-blocking mode, returns immediately with WouldBlock error if no data available
     ///
     /// # Returns
-    /// A Result containing the deserialized message and the sender's address, or an IO error
+    /// A Result containing the deserialized message and the sender's address, or an IO error.
+    /// In non-blocking mode (timeout: None), may return ErrorKind::WouldBlock if no data is available.
     ///
     /// # Example
     ///
     /// ```rust,no_run
     /// use multicast_rs::subscriber::MulticastSubscriber;
     /// use std::time::Duration;
+    /// use std::io::ErrorKind;
     /// use serde::Deserialize;
     ///
     /// #[derive(Deserialize)]
@@ -1011,12 +1096,23 @@ impl MulticastSubscriber {
     ///
     /// let subscriber = MulticastSubscriber::new_ipv4(None, None).unwrap();
     ///
-    /// // Receive and deserialize a Bincode message with a 2 second timeout
+    /// // Blocking receive with timeout
     /// match subscriber.receive_bincode::<TradeData>(Some(Duration::from_secs(2))) {
     ///     Ok((trade, addr)) => {
     ///         println!("Received trade from {}: {} @ ${:.2}", addr, trade.symbol, trade.price);
     ///     },
-    ///     Err(e) => eprintln!("Error receiving message: {}", e),
+    ///     Err(e) => eprintln!("Error or timeout: {}", e),
+    /// }
+    ///
+    /// // Non-blocking receive
+    /// match subscriber.receive_bincode::<TradeData>(None) {
+    ///     Ok((trade, addr)) => {
+    ///         println!("Received trade from {}: {} @ ${:.2}", addr, trade.symbol, trade.price);
+    ///     },
+    ///     Err(e) if e.kind() == ErrorKind::WouldBlock => {
+    ///         println!("No data available right now");
+    ///     },
+    ///     Err(e) => eprintln!("Unexpected error: {}", e),
     /// }
     /// ```
     pub fn receive_bincode<T: DeserializeOwned>(
@@ -2038,5 +2134,30 @@ mod tests {
 
         // Wait for the sender thread to finish
         sender_thread.join().unwrap();
+    }
+
+    #[test]
+    fn test_none_timeout_means_nonblocking() {
+        let port = get_unique_port();
+        let subscriber =
+            MulticastSubscriber::new_ipv4(Some(port), None).expect("Failed to create subscriber");
+
+        // Attempt a non-blocking receive using None timeout
+        let result = subscriber.receive(None);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::WouldBlock);
+
+        // Now set a 0 duration timeout
+        // Note: On some systems, a zero duration might be considered invalid input,
+        // while on others it may result in an immediate timeout
+        let result = subscriber.receive(Some(Duration::from_secs(0)));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.kind() == io::ErrorKind::TimedOut || err.kind() == io::ErrorKind::InvalidInput,
+            "Expected TimedOut or InvalidInput error, got: {:?}",
+            err.kind()
+        );
     }
 }
