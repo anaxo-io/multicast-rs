@@ -12,8 +12,8 @@ pub mod subscriber;
 
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
-use std::sync::{Arc, Barrier};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Barrier};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -61,7 +61,7 @@ fn get_interface_addr(interface: Option<&str>, fallback: &IpAddr) -> io::Result<
 fn get_interface_ip(interface_name: &str, want_ipv4: bool) -> io::Result<Option<IpAddr>> {
     // For now, we'll use a simple approach to get interface IPs
     // A more robust implementation could use platform-specific methods
-    
+
     // First, check if interface_name is directly an IP address
     if let Ok(addr) = interface_name.parse::<IpAddr>() {
         return Ok(Some(addr));
@@ -70,29 +70,29 @@ fn get_interface_ip(interface_name: &str, want_ipv4: bool) -> io::Result<Option<
     #[cfg(target_family = "unix")]
     {
         use std::process::Command;
-        
+
         // This is a simplistic approach - we run 'ip addr' command and parse it
         // In production code, you'd want to use a proper network interface library
         let output = Command::new("ip")
             .args(&["addr", "show", "dev", interface_name])
             .output()?;
-            
+
         if !output.status.success() {
             return Err(io::Error::new(
-                io::ErrorKind::NotFound, 
-                format!("Interface {} not found", interface_name)
+                io::ErrorKind::NotFound,
+                format!("Interface {} not found", interface_name),
             ));
         }
-        
+
         let output_str = String::from_utf8_lossy(&output.stdout);
-        
+
         // Extract IP addresses from the output
         let mut ipv4_addr: Option<IpAddr> = None;
         let mut ipv6_addr: Option<IpAddr> = None;
-        
+
         for line in output_str.lines() {
             let line = line.trim();
-            
+
             // Look for IPv4 addresses
             if line.starts_with("inet ") {
                 let parts: Vec<&str> = line.split_whitespace().collect();
@@ -105,7 +105,7 @@ fn get_interface_ip(interface_name: &str, want_ipv4: bool) -> io::Result<Option<
                     }
                 }
             }
-            
+
             // Look for IPv6 addresses
             if line.starts_with("inet6 ") {
                 let parts: Vec<&str> = line.split_whitespace().collect();
@@ -114,7 +114,9 @@ fn get_interface_ip(interface_name: &str, want_ipv4: bool) -> io::Result<Option<
                     if let Some(ip_str) = addr_with_prefix.split('/').next() {
                         if let Ok(addr) = ip_str.parse::<Ipv6Addr>() {
                             // Skip link-local addresses unless they're explicitly requested
-                            if !addr.is_unicast_link_local() || interface_name.contains("link-local") {
+                            if !addr.is_unicast_link_local()
+                                || interface_name.contains("link-local")
+                            {
                                 ipv6_addr = Some(IpAddr::V6(addr));
                             }
                         }
@@ -122,18 +124,22 @@ fn get_interface_ip(interface_name: &str, want_ipv4: bool) -> io::Result<Option<
                 }
             }
         }
-        
+
         // Return the appropriate IP address type based on what was requested
-        return Ok(if want_ipv4 { ipv4_addr } else { ipv6_addr.or(ipv4_addr) });
+        return Ok(if want_ipv4 {
+            ipv4_addr
+        } else {
+            ipv6_addr.or(ipv4_addr)
+        });
     }
-    
+
     #[cfg(not(target_family = "unix"))]
     {
         // On non-Unix platforms, we'll return None for now
         // A robust implementation would use platform-specific APIs
         return Err(io::Error::new(
             io::ErrorKind::Unsupported,
-            "Interface lookup not implemented on this platform"
+            "Interface lookup not implemented on this platform",
         ));
     }
 }
@@ -162,7 +168,7 @@ fn join_multicast(addr: SocketAddr, interface: Option<&str>) -> io::Result<UdpSo
     let ip_addr = addr.ip();
 
     let socket = new_socket(&addr)?;
-    
+
     // Get the interface address
     let iface_addr = get_interface_addr(interface, &IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)))?;
 
@@ -174,7 +180,7 @@ fn join_multicast(addr: SocketAddr, interface: Option<&str>) -> io::Result<UdpSo
                 IpAddr::V4(v4) => v4,
                 _ => Ipv4Addr::new(0, 0, 0, 0), // Default to all interfaces
             };
-            
+
             // join to the multicast address, with the specified interface
             socket.join_multicast_v4(mdns_v4, &iface_v4)?;
         }
@@ -188,7 +194,7 @@ fn join_multicast(addr: SocketAddr, interface: Option<&str>) -> io::Result<UdpSo
                         let output = std::process::Command::new("ip")
                             .args(&["link", "show", "dev", iface])
                             .output()?;
-                        
+
                         if output.status.success() {
                             // Very naive parsing - in production code use proper APIs
                             let output_str = String::from_utf8_lossy(&output.stdout);
@@ -209,7 +215,7 @@ fn join_multicast(addr: SocketAddr, interface: Option<&str>) -> io::Result<UdpSo
                             0 // Default to all interfaces
                         }
                     }
-                    
+
                     #[cfg(not(target_family = "unix"))]
                     {
                         0 // Default to all interfaces on non-Unix
@@ -217,7 +223,7 @@ fn join_multicast(addr: SocketAddr, interface: Option<&str>) -> io::Result<UdpSo
                 }
                 None => 0, // Default to all interfaces
             };
-            
+
             // join to the multicast address, with the specified interface
             socket.join_multicast_v6(mdns_v6, iface_idx)?;
             socket.set_only_v6(true)?;
@@ -236,17 +242,15 @@ fn new_sender(addr: &SocketAddr, interface: Option<&str>) -> io::Result<UdpSocke
 
     if addr.is_ipv4() {
         // Get interface address if specified
-        let iface_v4 = match get_interface_addr(interface, &IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)))? {
+        let iface_v4 = match get_interface_addr(interface, &IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)))?
+        {
             IpAddr::V4(v4) => v4,
             _ => Ipv4Addr::new(0, 0, 0, 0), // Default to all interfaces
         };
-        
+
         socket.set_multicast_if_v4(&iface_v4)?;
 
-        socket.bind(&SockAddr::from(SocketAddr::new(
-            iface_v4.into(),
-            0,
-        )))?;
+        socket.bind(&SockAddr::from(SocketAddr::new(iface_v4.into(), 0)))?;
     } else {
         // For IPv6 interfaces
         let iface_idx = match interface {
@@ -257,7 +261,7 @@ fn new_sender(addr: &SocketAddr, interface: Option<&str>) -> io::Result<UdpSocke
                     let output = std::process::Command::new("ip")
                         .args(&["link", "show", "dev", iface])
                         .output()?;
-                    
+
                     if output.status.success() {
                         let output_str = String::from_utf8_lossy(&output.stdout);
                         if let Some(first_line) = output_str.lines().next() {
@@ -277,7 +281,7 @@ fn new_sender(addr: &SocketAddr, interface: Option<&str>) -> io::Result<UdpSocke
                         0
                     }
                 }
-                
+
                 #[cfg(not(target_family = "unix"))]
                 {
                     0 // Default on non-Unix
@@ -285,7 +289,7 @@ fn new_sender(addr: &SocketAddr, interface: Option<&str>) -> io::Result<UdpSocke
             }
             None => 0,
         };
-        
+
         socket.set_multicast_if_v6(iface_idx)?;
 
         socket.bind(&SockAddr::from(SocketAddr::new(
@@ -297,4 +301,3 @@ fn new_sender(addr: &SocketAddr, interface: Option<&str>) -> io::Result<UdpSocke
     // convert to standard sockets...
     Ok(socket.into())
 }
-

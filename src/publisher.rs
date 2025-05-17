@@ -1,12 +1,12 @@
 // Copyright 2023
 //! # Multicast Publisher
-//! 
+//!
 //! This module provides functionality for publishing messages to multicast groups.
 //! It supports both IPv4 and IPv6 multicast addresses, and includes methods for
 //! sending individual messages or batches of messages.
 //!
 //! ## Features
-//! 
+//!
 //! - Create publishers for both IPv4 and IPv6 multicast addresses
 //! - Send individual messages to multicast groups
 //! - Send batches of messages with configurable delays between them
@@ -81,7 +81,7 @@ use std::time::Duration;
 
 use socket2::{SockAddr, Socket};
 
-use crate::{IPV4, IPV6, PORT, new_socket, new_sender};
+use crate::{new_sender, new_socket, IPV4, IPV6, PORT};
 
 /// A publisher for sending messages to a multicast group.
 ///
@@ -91,7 +91,7 @@ use crate::{IPV4, IPV6, PORT, new_socket, new_sender};
 pub struct MulticastPublisher {
     /// The UDP socket used to send multicast messages
     socket: UdpSocket,
-    
+
     /// The multicast address (IP and port) that this publisher sends to
     addr: SocketAddr,
 }
@@ -148,13 +148,17 @@ impl MulticastPublisher {
     /// let addr = IpAddr::from_str("224.0.0.123").unwrap();
     /// let publisher = MulticastPublisher::new_with_interface(addr, Some(8000), Some("eth0")).unwrap();
     /// ```
-    pub fn new_with_interface(addr: IpAddr, port: Option<u16>, interface: Option<&str>) -> io::Result<Self> {
+    pub fn new_with_interface(
+        addr: IpAddr,
+        port: Option<u16>,
+        interface: Option<&str>,
+    ) -> io::Result<Self> {
         assert!(addr.is_multicast(), "Address must be a multicast address");
-        
+
         let port = port.unwrap_or(PORT);
         let addr = SocketAddr::new(addr, port);
         let socket = new_sender(&addr, interface)?;
-        
+
         Ok(MulticastPublisher { socket, addr })
     }
 
@@ -280,10 +284,10 @@ impl MulticastPublisher {
     pub fn publish<T: AsRef<[u8]>>(&self, message: T) -> io::Result<usize> {
         self.socket.send_to(message.as_ref(), &self.addr)
     }
-    
+
     /// Publish a message and wait for a response.
     ///
-    /// This method sends a message to the multicast group and then waits for a 
+    /// This method sends a message to the multicast group and then waits for a
     /// direct response from any recipient. This is useful for request-response
     /// patterns where you expect a specific recipient to reply.
     ///
@@ -313,23 +317,23 @@ impl MulticastPublisher {
     pub fn publish_and_receive<T: AsRef<[u8]>>(
         &self,
         message: T,
-        timeout: Option<Duration>
+        timeout: Option<Duration>,
     ) -> io::Result<(Vec<u8>, SocketAddr)> {
         // Set timeout if provided
         if let Some(duration) = timeout {
             self.socket.set_read_timeout(Some(duration))?;
         }
-        
+
         // Send the message
         self.socket.send_to(message.as_ref(), &self.addr)?;
-        
+
         // Prepare to receive the response
         let mut buf = vec![0u8; 1024]; // 1KB buffer
         let (size, addr) = self.socket.recv_from(&mut buf)?;
-        
+
         // Resize buffer to actual data size
         buf.truncate(size);
-        
+
         Ok((buf, addr))
     }
 
@@ -370,16 +374,17 @@ impl MulticastPublisher {
     ///     }
     /// }
     /// ```
-    pub fn publish_batch<T: AsRef<[u8]>>(&self, 
-        messages: &[T], 
-        delay_between_messages_ms: Option<u64>
+    pub fn publish_batch<T: AsRef<[u8]>>(
+        &self,
+        messages: &[T],
+        delay_between_messages_ms: Option<u64>,
     ) -> Vec<io::Result<usize>> {
         let mut results = Vec::with_capacity(messages.len());
-        
+
         for message in messages {
             let result = self.publish(message);
             results.push(result);
-            
+
             // Add delay between messages if specified
             if let Some(delay) = delay_between_messages_ms {
                 if delay > 0 {
@@ -387,7 +392,7 @@ impl MulticastPublisher {
                 }
             }
         }
-        
+
         results
     }
 
@@ -407,7 +412,7 @@ impl MulticastPublisher {
     pub fn address(&self) -> SocketAddr {
         self.addr
     }
-    
+
     /// Get a reference to the underlying UDP socket.
     ///
     /// This allows access to the raw socket for advanced configurations.
@@ -435,14 +440,14 @@ impl MulticastPublisher {
 mod tests {
     use super::*;
     use crate::join_multicast;
+    use std::sync::atomic::{AtomicU16, Ordering};
+    use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::Duration;
-    use std::sync::{Arc, Mutex};
-    use std::sync::atomic::{AtomicU16, Ordering};
-    
+
     // Use atomic counter to ensure each test gets a unique port
     static PORT_COUNTER: AtomicU16 = AtomicU16::new(7700);
-    
+
     fn get_unique_port() -> u16 {
         PORT_COUNTER.fetch_add(1, Ordering::SeqCst)
     }
@@ -450,9 +455,9 @@ mod tests {
     #[test]
     fn test_publisher_creation() {
         let port = get_unique_port();
-        let publisher = MulticastPublisher::new(*IPV4, Some(port))
-            .expect("Failed to create publisher");
-        
+        let publisher =
+            MulticastPublisher::new(*IPV4, Some(port)).expect("Failed to create publisher");
+
         assert_eq!(publisher.address().ip(), *IPV4);
         assert_eq!(publisher.address().port(), port);
     }
@@ -461,53 +466,59 @@ mod tests {
     fn test_publish_different_sizes() {
         let port = get_unique_port();
         let addr = SocketAddr::new(*IPV4, port);
-        
+
         // Create a subscriber socket to receive the messages
-        let receiver = join_multicast(addr, None)
-            .expect("Failed to create receiver socket");
-        
+        let receiver = join_multicast(addr, None).expect("Failed to create receiver socket");
+
         // Set a reasonable timeout
-        receiver.set_read_timeout(Some(Duration::from_secs(2)))
+        receiver
+            .set_read_timeout(Some(Duration::from_secs(2)))
             .expect("Failed to set read timeout");
-        
+
         // Create publisher
-        let publisher = MulticastPublisher::new(*IPV4, Some(port))
-            .expect("Failed to create publisher");
-        
+        let publisher =
+            MulticastPublisher::new(*IPV4, Some(port)).expect("Failed to create publisher");
+
         // Give the receiver time to fully initialize
         thread::sleep(Duration::from_millis(50));
-        
+
         // Test a small message
         let small_msg = b"small";
-        let bytes_sent = publisher.publish(small_msg)
+        let bytes_sent = publisher
+            .publish(small_msg)
             .expect("Failed to publish small message");
         assert_eq!(bytes_sent, small_msg.len());
-        
+
         // Receive and verify the small message
         let mut buf = vec![0u8; 1024];
-        let (size, _) = receiver.recv_from(&mut buf)
+        let (size, _) = receiver
+            .recv_from(&mut buf)
             .expect("Failed to receive small message");
         assert_eq!(&buf[..size], small_msg);
-        
+
         // Test a medium-sized message
         let medium_msg = vec![b'A'; 512];
-        let bytes_sent = publisher.publish(&medium_msg)
+        let bytes_sent = publisher
+            .publish(&medium_msg)
             .expect("Failed to publish medium message");
         assert_eq!(bytes_sent, medium_msg.len());
-        
+
         // Receive and verify the medium message
-        let (size, _) = receiver.recv_from(&mut buf)
+        let (size, _) = receiver
+            .recv_from(&mut buf)
             .expect("Failed to receive medium message");
         assert_eq!(&buf[..size], &medium_msg);
-        
+
         // Test a large message
         let large_msg = vec![b'B'; 1000];
-        let bytes_sent = publisher.publish(&large_msg)
+        let bytes_sent = publisher
+            .publish(&large_msg)
             .expect("Failed to publish large message");
         assert_eq!(bytes_sent, large_msg.len());
-        
+
         // Receive and verify the large message
-        let (size, _) = receiver.recv_from(&mut buf)
+        let (size, _) = receiver
+            .recv_from(&mut buf)
             .expect("Failed to receive large message");
         assert_eq!(&buf[..size], &large_msg);
     }
@@ -517,55 +528,55 @@ mod tests {
         let port = get_unique_port();
         let addr = SocketAddr::new(*IPV4, port);
         let test_msg = b"Echo this message";
-        
+
         // Create flags for coordinating thread execution
         let responder_ready = Arc::new(Mutex::new(false));
         let responder_ready_clone = responder_ready.clone();
-        
+
         // Create a publisher
-        let publisher = MulticastPublisher::new(*IPV4, Some(port))
-            .expect("Failed to create publisher");
-        
+        let publisher =
+            MulticastPublisher::new(*IPV4, Some(port)).expect("Failed to create publisher");
+
         // Start a thread that will act as the responder
         let handle = thread::spawn(move || {
             // Create a subscriber to receive the initial message
-            let socket = join_multicast(addr, None)
-                .expect("Failed to join multicast group");
-            
+            let socket = join_multicast(addr, None).expect("Failed to join multicast group");
+
             // Signal that we're ready to receive
             {
                 let mut ready = responder_ready_clone.lock().unwrap();
                 *ready = true;
             }
-            
+
             // Set a reasonable timeout
-            socket.set_read_timeout(Some(Duration::from_secs(5)))
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
                 .expect("Failed to set read timeout");
-            
+
             // Wait for a message
             let mut buf = vec![0u8; 1024];
             match socket.recv_from(&mut buf) {
                 Ok((size, src_addr)) => {
                     // Echo the received data back to the sender
                     let response = format!("Echoed: {}", String::from_utf8_lossy(&buf[..size]));
-                    
+
                     // Use UdpSocket directly instead of Socket
-                    let responder = UdpSocket::bind("0.0.0.0:0")
-                        .expect("Failed to create responder socket");
-                    
+                    let responder =
+                        UdpSocket::bind("0.0.0.0:0").expect("Failed to create responder socket");
+
                     // Add a small delay to ensure publisher is ready to receive
                     thread::sleep(Duration::from_millis(50));
-                    
+
                     responder
                         .send_to(response.as_bytes(), &src_addr)
                         .expect("Failed to send response");
-                },
+                }
                 Err(e) => {
                     eprintln!("Error receiving message: {}", e);
                 }
             }
         });
-        
+
         // Wait until responder thread signals it's ready
         let mut ready = false;
         for _ in 0..10 {
@@ -578,25 +589,25 @@ mod tests {
             }
             thread::sleep(Duration::from_millis(50));
         }
-        
+
         if !ready {
             panic!("Responder thread failed to start in time");
         }
-        
+
         // Give the responder thread a bit more time to be fully ready to receive
         thread::sleep(Duration::from_millis(100));
-        
+
         // Publish and wait for response with a generous timeout
         match publisher.publish_and_receive(test_msg, Some(Duration::from_secs(5))) {
             Ok((response, _)) => {
                 let response_str = String::from_utf8_lossy(&response);
                 assert_eq!(response_str, "Echoed: Echo this message");
-            },
+            }
             Err(e) => {
                 panic!("Failed to receive response: {}", e);
             }
         }
-        
+
         // Wait for the responder thread to finish
         handle.join().expect("Failed to join responder thread");
     }
@@ -605,22 +616,22 @@ mod tests {
     fn test_publish_batch() {
         let port = get_unique_port();
         let addr = SocketAddr::new(*IPV4, port);
-        
+
         // Create a subscriber socket to receive the messages
-        let receiver = join_multicast(addr, None)
-            .expect("Failed to create receiver socket");
-        
+        let receiver = join_multicast(addr, None).expect("Failed to create receiver socket");
+
         // Set a reasonable timeout
-        receiver.set_read_timeout(Some(Duration::from_secs(2)))
+        receiver
+            .set_read_timeout(Some(Duration::from_secs(2)))
             .expect("Failed to set read timeout");
-        
+
         // Create publisher
-        let publisher = MulticastPublisher::new(*IPV4, Some(port))
-            .expect("Failed to create publisher");
-        
+        let publisher =
+            MulticastPublisher::new(*IPV4, Some(port)).expect("Failed to create publisher");
+
         // Give the receiver time to fully initialize
         thread::sleep(Duration::from_millis(50));
-        
+
         // Create a batch of messages
         let messages = vec![
             b"batch message 1".to_vec(),
@@ -629,10 +640,10 @@ mod tests {
             b"batch message 4".to_vec(),
             b"batch message 5".to_vec(),
         ];
-        
+
         // Publish the batch with a small delay between messages
         let results = publisher.publish_batch(&messages, Some(10));
-        
+
         // Check that all messages were sent successfully
         for (i, result) in results.iter().enumerate() {
             match result {
@@ -640,28 +651,34 @@ mod tests {
                 Err(e) => panic!("Failed to send message {}: {}", i, e),
             }
         }
-        
+
         // Receive and verify all messages
         let mut buf = vec![0u8; 1024];
         let mut received_messages = Vec::new();
-        
+
         for _ in 0..messages.len() {
             match receiver.recv_from(&mut buf) {
                 Ok((size, _)) => {
                     received_messages.push(buf[..size].to_vec());
-                },
+                }
                 Err(e) => {
                     panic!("Failed to receive message: {}", e);
                 }
             }
         }
-        
+
         // Verify that all messages were received (possibly out of order)
         assert_eq!(received_messages.len(), messages.len());
-        
+
         for sent_msg in &messages {
-            let found = received_messages.iter().any(|received| received == sent_msg);
-            assert!(found, "Message not found in received batch: {:?}", String::from_utf8_lossy(sent_msg));
+            let found = received_messages
+                .iter()
+                .any(|received| received == sent_msg);
+            assert!(
+                found,
+                "Message not found in received batch: {:?}",
+                String::from_utf8_lossy(sent_msg)
+            );
         }
     }
 
@@ -674,7 +691,7 @@ mod tests {
         if let Ok(publisher) = MulticastPublisher::new_ipv6(Some(port)) {
             assert_eq!(publisher.address().ip(), *IPV6);
             assert_eq!(publisher.address().port(), port);
-            
+
             // Basic publish test - mainly checking that it doesn't error
             if let Err(e) = publisher.publish(b"IPv6 test message") {
                 eprintln!("Note: IPv6 multicast publish failed: {}", e);
@@ -689,44 +706,50 @@ mod tests {
     #[test]
     fn test_publisher_interface_creation() {
         let port = get_unique_port();
-        
+
         // Try to create a publisher with the loopback interface
         // This should work on all systems
         match MulticastPublisher::new_ipv4_with_interface(Some(port), Some("lo")) {
             Ok(publisher) => {
                 println!("Successfully created publisher on loopback interface");
                 assert_eq!(publisher.address().port(), port);
-            },
+            }
             Err(e) => {
                 // On some systems this might fail but we don't want the test to fail
                 println!("Could not create publisher on loopback interface: {}", e);
             }
         }
-        
+
         // Also test with direct IP address specification
         match MulticastPublisher::new_ipv4_with_interface(Some(port), Some("127.0.0.1")) {
             Ok(publisher) => {
                 println!("Successfully created publisher with explicit IP 127.0.0.1");
                 assert_eq!(publisher.address().port(), port);
-            },
+            }
             Err(e) => {
                 // This should generally work on all systems, but don't fail the test
-                println!("Could not create publisher with explicit IP 127.0.0.1: {}", e);
+                println!(
+                    "Could not create publisher with explicit IP 127.0.0.1: {}",
+                    e
+                );
             }
         }
-        
+
         // Test with a non-existent interface
         // This should fail with a specific error
         match MulticastPublisher::new_ipv4_with_interface(Some(port), Some("nonexistent_iface")) {
             Ok(_) => {
                 panic!("Publisher was created with non-existent interface, should have failed");
-            },
+            }
             Err(e) => {
                 println!("Expected error for non-existent interface: {}", e);
                 // Check that it's the correct error type - not found
-                assert!(e.kind() == std::io::ErrorKind::NotFound || 
-                        e.kind() == std::io::ErrorKind::Unsupported,
-                        "Expected NotFound or Unsupported error, got: {:?}", e.kind());
+                assert!(
+                    e.kind() == std::io::ErrorKind::NotFound
+                        || e.kind() == std::io::ErrorKind::Unsupported,
+                    "Expected NotFound or Unsupported error, got: {:?}",
+                    e.kind()
+                );
             }
         }
     }
@@ -736,30 +759,36 @@ mod tests {
     #[test]
     fn test_publisher_with_detected_interface() {
         let port = get_unique_port();
-        
+
         // Try to detect a real network interface
         let interface = detect_network_interface();
-        
+
         if let Some(iface) = interface {
             println!("Testing with detected interface: {}", iface);
-            
+
             match MulticastPublisher::new_ipv4_with_interface(Some(port), Some(&iface)) {
                 Ok(publisher) => {
                     assert_eq!(publisher.address().port(), port);
-                    
+
                     // Try to publish a message to verify basic functionality
                     match publisher.publish("Test on real interface") {
                         Ok(bytes) => {
-                            println!("Successfully published {} bytes on interface {}", bytes, iface);
-                        },
+                            println!(
+                                "Successfully published {} bytes on interface {}",
+                                bytes, iface
+                            );
+                        }
                         Err(e) => {
                             println!("Failed to publish on interface {}: {}", iface, e);
                             // Not failing test, as publishing might not work for various reasons
                         }
                     }
-                },
+                }
                 Err(e) => {
-                    println!("Could not create publisher on detected interface {}: {}", iface, e);
+                    println!(
+                        "Could not create publisher on detected interface {}: {}",
+                        iface, e
+                    );
                     // Not failing the test as the interface might not support multicast
                 }
             }
@@ -767,18 +796,18 @@ mod tests {
             println!("No suitable network interface detected, skipping test");
         }
     }
-    
+
     // Helper function to detect a real network interface
     fn detect_network_interface() -> Option<String> {
         #[cfg(target_family = "unix")]
         {
             use std::process::Command;
-            
+
             // Use ip link to get interfaces, excluding loopback
             if let Ok(output) = Command::new("ip").args(&["link", "show"]).output() {
                 if output.status.success() {
                     let output_str = String::from_utf8_lossy(&output.stdout);
-                    
+
                     // Very naive parsing - in production code use proper APIs
                     for line in output_str.lines() {
                         if line.contains(": ") && !line.contains("lo:") {
@@ -793,7 +822,7 @@ mod tests {
                 }
             }
         }
-        
+
         None
     }
 }
