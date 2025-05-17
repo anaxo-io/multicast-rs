@@ -1,0 +1,30 @@
+
+/target
+**/*.rs.bk
+# Cargo lock file (uncomment for libraries)
+Cargo.lock
+
+# IDE specific files
+.idea/
+.vscode/
+*.sublime-*
+.atom/
+.DS_Store
+
+# Generated documentation
+/doc/
+
+# Debug artifacts
+*.pdb
+**/*.profraw
+/flamegraph.svg
+
+# Dependency directory
+/vendor/
+
+# Local environment configuration
+.env
+.env.local
+
+# Cargo config local overrides
+.cargo/config.local.toml

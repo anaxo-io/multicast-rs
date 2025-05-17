@@ -1,0 +1,21 @@
+[package]
+name = "multicast-rs"
+version = "0.1.0"
+authors = ["Hicham Medkouri <hicham@anaxo.io>"]
+description = "A Rust library for IPv4 and IPv6 multicast networking"
+repository = "https://github.com/hmedkouri/multicast-rs"
+license = "MIT"
+keywords = ["multicast", "networking", "ipv4", "ipv6", "udp"]
+categories = ["network-programming", "api-bindings"]
+readme = "README.md"
+include = [
+    "examples/**/*",
+    "src/**/*",
+    "Cargo.toml",
+    "README.md",
+    "LICENSE"
+]
+
+[dependencies]
+lazy_static = "1.5.0"
+socket2 = { version = "0.5.9", features = ["all"] }
