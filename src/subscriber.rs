@@ -425,7 +425,7 @@ impl MulticastSubscriber {
             Ok(ip_addr) => Self::new(ip_addr, port, buffer_size),
             Err(e) => Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("Invalid IP address: {}", e),
+                format!("Invalid IP address: {e}"),
             )),
         }
     }
@@ -459,7 +459,7 @@ impl MulticastSubscriber {
             Ok(ip_addr) => Self::new_with_interface(ip_addr, port, interface, buffer_size),
             Err(e) => Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("Invalid IP address: {}", e),
+                format!("Invalid IP address: {e}"),
             )),
         }
     }
@@ -738,18 +738,23 @@ impl MulticastSubscriber {
 
                                     io::Error::new(
                                         io::ErrorKind::InvalidData,
-                                        format!("Failed to deserialize JSON: {}", e),
+                                        format!("Failed to deserialize JSON: {e}"),
                                     )
                                 })
                             }
                             DeserializeFormat::Bincode => {
-                                bincode::deserialize::<T>(&temp_buffer[..size]).map_err(|e| {
+                                bincode::serde::decode_from_slice::<T, _>(
+                                    &temp_buffer[..size],
+                                    bincode::config::standard(),
+                                )
+                                .map(|(result, _)| result)
+                                .map_err(|e| {
                                     // Update error stats
                                     stats.deserialization_errors += 1;
 
                                     io::Error::new(
                                         io::ErrorKind::InvalidData,
-                                        format!("Failed to deserialize binary data: {}", e),
+                                        format!("Failed to deserialize binary data: {e}"),
                                     )
                                 })
                             }
@@ -789,7 +794,12 @@ impl MulticastSubscriber {
                                 })
                             }
                             DeserializeFormat::Bincode => {
-                                bincode::deserialize::<T>(&temp_buffer[..size]).map_err(|e| {
+                                bincode::serde::decode_from_slice::<T, _>(
+                                    &temp_buffer[..size],
+                                    bincode::config::standard(),
+                                )
+                                .map(|(result, _)| result)
+                                .map_err(|e| {
                                     io::Error::new(
                                         io::ErrorKind::InvalidData,
                                         format!("Failed to deserialize binary data: {}", e),
@@ -1033,7 +1043,7 @@ impl MulticastSubscriber {
 
         // Start the listener thread
         let join_handle = thread::Builder::new()
-            .name(format!("multicast-subscriber:{}", addr))
+            .name(format!("multicast-subscriber:{addr}"))
             .spawn(move || {
                 let mut buf = vec![0u8; buffer_size];
 
@@ -1106,7 +1116,7 @@ impl MulticastSubscriber {
                             thread::sleep(Duration::from_millis(10));
                         }
                         Err(e) => {
-                            eprintln!("Error receiving multicast: {}", e);
+                            eprintln!("Error receiving multicast: {e}");
                             #[cfg(feature = "stats")]
                             {
                                 stats.socket_errors += 1;
@@ -1246,15 +1256,19 @@ impl MulticastSubscriber {
             DeserializeFormat::Json => serde_json::from_slice::<T>(&data).map_err(|e| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("Failed to deserialize JSON: {}", e),
+                    format!("Failed to deserialize JSON: {e}"),
                 )
             }),
-            DeserializeFormat::Bincode => bincode::deserialize::<T>(&data).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("Failed to deserialize binary data: {}", e),
-                )
-            }),
+            DeserializeFormat::Bincode => {
+                bincode::serde::decode_from_slice::<T, _>(&data, bincode::config::standard())
+                    .map(|(result, _)| result)
+                    .map_err(|e| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("Failed to deserialize binary data: {e}"),
+                        )
+                    })
+            }
         }?;
 
         Ok((deserialized, addr))
@@ -1426,7 +1440,7 @@ impl BackgroundSubscriber {
         self.running.store(false, Ordering::Relaxed);
         if let Some(handle) = self.join_handle.take() {
             if let Err(e) = handle.join() {
-                eprintln!("Error joining multicast listener thread: {:?}", e);
+                eprintln!("Error joining multicast listener thread: {e:?}");
             }
         }
     }
@@ -1460,7 +1474,7 @@ mod tests {
     use super::*;
     use crate::new_sender;
     use crate::publisher::MulticastPublisher;
-    use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicU16, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
@@ -1508,7 +1522,7 @@ mod tests {
 
             // Send a test message
             socket
-                .send_to(b"Hello from test!", &addr)
+                .send_to(b"Hello from test!", addr)
                 .expect("Failed to send message");
         });
 
@@ -1525,7 +1539,7 @@ mod tests {
                 assert_eq!("Hello from test!", message);
             }
             Err(e) => {
-                panic!("Failed to receive message: {}", e);
+                panic!("Failed to receive message: {e}");
             }
         }
 
@@ -1597,7 +1611,7 @@ mod tests {
 
             // Send a test message
             socket
-                .send_to(b"Request message", &addr)
+                .send_to(b"Request message", addr)
                 .expect("Failed to send message");
 
             // Wait for response
@@ -1608,7 +1622,7 @@ mod tests {
                     assert_eq!("Response to: Request message", response);
                 }
                 Err(e) => {
-                    panic!("Failed to receive response: {}", e);
+                    panic!("Failed to receive response: {e}");
                 }
             }
         });
@@ -1628,7 +1642,7 @@ mod tests {
                 assert_eq!("Request message", message);
             }
             Err(e) => {
-                panic!("Failed to receive or respond to message: {}", e);
+                panic!("Failed to receive or respond to message: {e}");
             }
         }
 
@@ -1651,7 +1665,7 @@ mod tests {
             Ok(s) => s,
             Err(e) => {
                 // If we can't bind to this port, just skip the test
-                println!("Skipping background test due to socket error: {}", e);
+                println!("Skipping background test due to socket error: {e}");
                 return;
             }
         };
@@ -1684,7 +1698,7 @@ mod tests {
             Ok(bg) => bg,
             Err(e) => {
                 // If we can't start the background subscriber, just skip the test
-                println!("Skipping background test due to error: {}", e);
+                println!("Skipping background test due to error: {e}");
                 return;
             }
         };
@@ -1697,18 +1711,18 @@ mod tests {
             Ok(s) => s,
             Err(e) => {
                 // If we can't create a sender, skip the test
-                println!("Skipping background test due to sender error: {}", e);
+                println!("Skipping background test due to sender error: {e}");
                 background.stop();
                 return;
             }
         };
 
         // Send multiple test messages with sufficient delay between them
-        let _ = socket.send_to(b"Message 1", &addr);
+        let _ = socket.send_to(b"Message 1", addr);
         thread::sleep(Duration::from_millis(100));
-        let _ = socket.send_to(b"Message 2", &addr);
+        let _ = socket.send_to(b"Message 2", addr);
         thread::sleep(Duration::from_millis(100));
-        let _ = socket.send_to(b"Message 3", &addr);
+        let _ = socket.send_to(b"Message 3", addr);
 
         // Sleep to allow processing of all messages
         thread::sleep(Duration::from_millis(500));
@@ -1722,7 +1736,7 @@ mod tests {
             // Only verify if we actually received messages
             // (This makes the test more robust on different platforms)
             println!("Received {} messages", messages.len());
-            assert!(messages.len() > 0);
+            assert!(!messages.is_empty());
         } else {
             println!(
                 "No messages received in background test - this may be expected on some platforms"
@@ -1795,7 +1809,7 @@ mod tests {
             // Send multiple test messages as JSON
             for i in 1..=message_count {
                 let test_msg = TestMessage {
-                    message: format!("Process batch message {}", i),
+                    message: format!("Process batch message {i}"),
                     index: i,
                 };
 
@@ -1804,7 +1818,7 @@ mod tests {
                     serde_json::to_string(&test_msg).expect("Failed to serialize test message");
 
                 socket
-                    .send_to(json.as_bytes(), &addr)
+                    .send_to(json.as_bytes(), addr)
                     .expect("Failed to send message");
 
                 // Add delay between messages
@@ -1843,12 +1857,8 @@ mod tests {
 
         // Check that each expected message was received
         for i in 1..=message_count {
-            let expected = format!("Process batch message {}", i);
-            assert!(
-                messages.contains(&expected),
-                "Missing message: {}",
-                expected
-            );
+            let expected = format!("Process batch message {i}");
+            assert!(messages.contains(&expected), "Missing message: {expected}");
         }
 
         // Check that the indices are correct in the deserialized messages
@@ -1856,8 +1866,7 @@ mod tests {
             let expected_index = i;
             assert!(
                 test_messages.iter().any(|m| m.index == expected_index),
-                "Message with index {} not found in deserialized results",
-                expected_index
+                "Message with index {expected_index} not found in deserialized results"
             );
         }
 
@@ -1878,7 +1887,7 @@ mod tests {
             }
             Err(e) => {
                 // On some systems this might fail but we don't want the test to fail
-                println!("Could not create subscriber on loopback interface: {}", e);
+                println!("Could not create subscriber on loopback interface: {e}");
             }
         }
 
@@ -1890,10 +1899,7 @@ mod tests {
             }
             Err(e) => {
                 // This should generally work on all systems, but don't fail the test
-                println!(
-                    "Could not create subscriber with explicit IP 127.0.0.1: {}",
-                    e
-                );
+                println!("Could not create subscriber with explicit IP 127.0.0.1: {e}");
             }
         }
 
@@ -1907,7 +1913,7 @@ mod tests {
                 panic!("Subscriber was created with non-existent interface, should have failed");
             }
             Err(e) => {
-                println!("Expected error for non-existent interface: {}", e);
+                println!("Expected error for non-existent interface: {e}");
                 // Check that it's the correct error type - not found
                 assert!(
                     e.kind() == std::io::ErrorKind::NotFound
@@ -1923,7 +1929,7 @@ mod tests {
     #[test]
     fn test_subscriber_with_interface_receive() {
         if let Some(iface) = detect_network_interface() {
-            println!("Testing subscriber with detected interface: {}", iface);
+            println!("Testing subscriber with detected interface: {iface}");
 
             let port = get_unique_port();
             let _addr = SocketAddr::new(*IPV4, port);
@@ -1958,7 +1964,7 @@ mod tests {
                                 true
                             }
                             Err(e) => {
-                                println!("Failed to receive on interface {}: {}", iface, e);
+                                println!("Failed to receive on interface {iface}: {e}");
                                 false
                             }
                         }
@@ -1987,13 +1993,10 @@ mod tests {
                     // Publish a message
                     match publisher.publish(test_message) {
                         Ok(bytes_sent) => {
-                            println!(
-                                "Published {} bytes on interface {}",
-                                bytes_sent, thread_iface
-                            );
+                            println!("Published {bytes_sent} bytes on interface {thread_iface}");
                         }
                         Err(e) => {
-                            println!("Failed to publish on interface {}: {}", thread_iface, e);
+                            println!("Failed to publish on interface {thread_iface}: {e}");
                         }
                     }
 
@@ -2002,8 +2005,7 @@ mod tests {
                         Ok(received) => {
                             if !received {
                                 println!(
-                                    "Test communication on interface {} did not succeed - this might be expected",
-                                    thread_iface
+                                    "Test communication on interface {thread_iface} did not succeed - this might be expected"
                                 );
                             }
                         }
@@ -2013,10 +2015,10 @@ mod tests {
                     }
                 }
                 (Err(e), _) => {
-                    println!("Could not create subscriber on interface {}: {}", iface, e);
+                    println!("Could not create subscriber on interface {iface}: {e}");
                 }
                 (_, Err(e)) => {
-                    println!("Could not create publisher on interface {}: {}", iface, e);
+                    println!("Could not create publisher on interface {iface}: {e}");
                 }
             }
         } else {
@@ -2052,11 +2054,11 @@ mod tests {
                     match subscriber.receive(Some(Duration::from_secs(3))) {
                         Ok((data, _)) => {
                             let message = String::from_utf8_lossy(&data);
-                            println!("Received on loopback: {}", message);
+                            println!("Received on loopback: {message}");
                             message == test_message
                         }
                         Err(e) => {
-                            println!("Failed to receive on loopback: {}", e);
+                            println!("Failed to receive on loopback: {e}");
                             false
                         }
                     }
@@ -2085,7 +2087,7 @@ mod tests {
                 // Publish a message
                 match publisher.publish(test_message) {
                     Ok(_) => println!("Published message on loopback interface"),
-                    Err(e) => println!("Failed to publish on loopback: {}", e),
+                    Err(e) => println!("Failed to publish on loopback: {e}"),
                 }
 
                 // Not asserting the result, just log what happens
@@ -2103,8 +2105,8 @@ mod tests {
                     Err(_) => println!("Receiver thread panicked"),
                 }
             }
-            (Err(e), _) => println!("Could not create subscriber on loopback: {}", e),
-            (_, Err(e)) => println!("Could not create publisher on loopback: {}", e),
+            (Err(e), _) => println!("Could not create subscriber on loopback: {e}"),
+            (_, Err(e)) => println!("Could not create publisher on loopback: {e}"),
         }
     }
 
@@ -2115,7 +2117,7 @@ mod tests {
             use std::process::Command;
 
             // Use ip link to get interfaces, excluding loopback
-            if let Ok(output) = Command::new("ip").args(&["link", "show"]).output() {
+            if let Ok(output) = Command::new("ip").args(["link", "show"]).output() {
                 if output.status.success() {
                     let output_str = String::from_utf8_lossy(&output.stdout);
 
@@ -2189,7 +2191,7 @@ mod tests {
 
             // Send the JSON message
             socket
-                .send_to(json.as_bytes(), &addr)
+                .send_to(json.as_bytes(), addr)
                 .expect("Failed to send message");
         });
 
@@ -2209,7 +2211,7 @@ mod tests {
                 assert_eq!(data.index, 42);
             }
             Err(e) => {
-                panic!("Failed to receive and deserialize message: {}", e);
+                panic!("Failed to receive and deserialize message: {e}");
             }
         }
 
@@ -2263,7 +2265,7 @@ mod tests {
 
             // Send the JSON message
             socket
-                .send_to(json.as_bytes(), &addr)
+                .send_to(json.as_bytes(), addr)
                 .expect("Failed to send message");
         });
 
@@ -2280,7 +2282,7 @@ mod tests {
                 assert_eq!(data.index, 101);
             }
             Err(e) => {
-                panic!("Failed to receive and deserialize JSON message: {}", e);
+                panic!("Failed to receive and deserialize JSON message: {e}");
             }
         }
 
@@ -2327,14 +2329,15 @@ mod tests {
             };
 
             // Serialize to Bincode
-            let encoded = bincode::serialize(&test_msg).expect("Failed to serialize test message");
+            let encoded = bincode::serde::encode_to_vec(&test_msg, bincode::config::standard())
+                .expect("Failed to serialize test message");
 
             // Create a sender socket
             let socket = new_sender(&addr, None).expect("Failed to create sender");
 
             // Send the Bincode message
             socket
-                .send_to(&encoded, &addr)
+                .send_to(&encoded, addr)
                 .expect("Failed to send message");
         });
 
@@ -2351,7 +2354,7 @@ mod tests {
                 assert_eq!(data.index, 202);
             }
             Err(e) => {
-                panic!("Failed to receive and deserialize Bincode message: {}", e);
+                panic!("Failed to receive and deserialize Bincode message: {e}");
             }
         }
 
@@ -2399,7 +2402,7 @@ mod tests {
 
             // Send the invalid JSON message
             socket
-                .send_to(invalid_json.as_bytes(), &addr)
+                .send_to(invalid_json.as_bytes(), addr)
                 .expect("Failed to send message");
         });
 
@@ -2416,7 +2419,7 @@ mod tests {
             }
             Err(e) => {
                 assert_eq!(e.kind(), io::ErrorKind::InvalidData);
-                println!("Expected error received: {}", e);
+                println!("Expected error received: {e}");
             }
         }
 
@@ -2558,7 +2561,7 @@ mod tests {
             // Send multiple test messages as JSON
             for i in 1..=message_count {
                 let test_msg = TestMessage {
-                    message: format!("Batch message {}", i),
+                    message: format!("Batch message {i}"),
                     index: i,
                 };
 
@@ -2567,7 +2570,7 @@ mod tests {
                     serde_json::to_string(&test_msg).expect("Failed to serialize test message");
 
                 socket
-                    .send_to(json.as_bytes(), &addr)
+                    .send_to(json.as_bytes(), addr)
                     .expect("Failed to send message");
 
                 // Add delay between messages
@@ -2623,7 +2626,7 @@ mod tests {
         let subscriber = match super::MulticastSubscriber::new_ipv4(Some(port), None) {
             Ok(sub) => sub,
             Err(e) => {
-                println!("Failed to create subscriber, skipping test: {}", e);
+                println!("Failed to create subscriber, skipping test: {e}");
                 return;
             }
         };
@@ -2637,7 +2640,7 @@ mod tests {
         }) {
             Ok(bg) => bg,
             Err(e) => {
-                println!("Failed to create background listener, skipping test: {}", e);
+                println!("Failed to create background listener, skipping test: {e}");
                 return;
             }
         };
@@ -2649,18 +2652,18 @@ mod tests {
         let socket = match new_sender(&addr, None) {
             Ok(s) => s,
             Err(e) => {
-                println!("Could not create sender: {}", e);
+                println!("Could not create sender: {e}");
                 background.stop();
                 return;
             }
         };
 
         // Send multiple test messages with sufficient delay between them
-        let _ = socket.send_to(b"Message 1", &addr);
+        let _ = socket.send_to(b"Message 1", addr);
         thread::sleep(Duration::from_millis(100));
-        let _ = socket.send_to(b"Message 2", &addr);
+        let _ = socket.send_to(b"Message 2", addr);
         thread::sleep(Duration::from_millis(100));
-        let _ = socket.send_to(b"Message 3", &addr);
+        let _ = socket.send_to(b"Message 3", addr);
 
         // Sleep to allow processing of all messages
         thread::sleep(Duration::from_millis(500));
@@ -2669,7 +2672,7 @@ mod tests {
         let bg_stats = background.get_stats();
 
         // Print stats for debugging
-        println!("Background subscriber stats: {:?}", bg_stats);
+        println!("Background subscriber stats: {bg_stats:?}");
 
         // Stop the background subscriber before making assertions
         background.stop();

@@ -41,16 +41,13 @@ fn main() {
     let publisher = match MulticastPublisher::new_str("224.0.0.123", None) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("Error creating publisher: {}", e);
+            eprintln!("Error creating publisher: {e}");
             return;
         }
     };
 
     println!("Publishing to {}...", publisher.address());
-    println!(
-        "Will send {} JSON messages with {}ms delay between them",
-        message_count, delay_ms
-    );
+    println!("Will send {message_count} JSON messages with {delay_ms}ms delay between them");
 
     // Sample stock symbols
     let symbols = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"];
@@ -73,7 +70,7 @@ fn main() {
         let json = match serde_json::to_string(&trade) {
             Ok(j) => j,
             Err(e) => {
-                eprintln!("Error serializing message: {}", e);
+                eprintln!("Error serializing message: {e}");
                 continue;
             }
         };
@@ -87,7 +84,7 @@ fn main() {
                 );
             }
             Err(e) => {
-                eprintln!("Error publishing message: {}", e);
+                eprintln!("Error publishing message: {e}");
             }
         }
 
@@ -95,5 +92,5 @@ fn main() {
         thread::sleep(Duration::from_millis(delay_ms));
     }
 
-    println!("Finished sending {} messages", message_count);
+    println!("Finished sending {message_count} messages");
 }

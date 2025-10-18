@@ -313,7 +313,7 @@ impl MulticastPublisher {
             Ok(ip_addr) => Self::new(ip_addr, port),
             Err(e) => Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("Invalid IP address: {}", e),
+                format!("Invalid IP address: {e}"),
             )),
         }
     }
@@ -345,7 +345,7 @@ impl MulticastPublisher {
             Ok(ip_addr) => Self::new_with_interface(ip_addr, port, interface),
             Err(e) => Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("Invalid IP address: {}", e),
+                format!("Invalid IP address: {e}"),
             )),
         }
     }
@@ -381,7 +381,7 @@ impl MulticastPublisher {
             let message_ref = message.as_ref();
             let message_len = message_ref.len();
 
-            match self.socket.send_to(message_ref, &self.addr) {
+            match self.socket.send_to(message_ref, self.addr) {
                 Ok(bytes_sent) => {
                     // Update statistics
                     let mut stats = self.stats.borrow_mut();
@@ -446,7 +446,7 @@ impl MulticastPublisher {
         }
 
         // Send the message
-        self.socket.send_to(message.as_ref(), &self.addr)?;
+        self.socket.send_to(message.as_ref(), self.addr)?;
 
         // Prepare to receive the response
         let mut buf = vec![0u8; 1024]; // 1KB buffer
@@ -701,11 +701,11 @@ mod tests {
                     thread::sleep(Duration::from_millis(50));
 
                     responder
-                        .send_to(response.as_bytes(), &src_addr)
+                        .send_to(response.as_bytes(), src_addr)
                         .expect("Failed to send response");
                 }
                 Err(e) => {
-                    eprintln!("Error receiving message: {}", e);
+                    eprintln!("Error receiving message: {e}");
                 }
             }
         });
@@ -737,7 +737,7 @@ mod tests {
                 assert_eq!(response_str, "Echoed: Echo this message");
             }
             Err(e) => {
-                panic!("Failed to receive response: {}", e);
+                panic!("Failed to receive response: {e}");
             }
         }
 
@@ -781,7 +781,7 @@ mod tests {
         for (i, result) in results.iter().enumerate() {
             match result {
                 Ok(bytes) => assert_eq!(*bytes, messages[i].len()),
-                Err(e) => panic!("Failed to send message {}: {}", i, e),
+                Err(e) => panic!("Failed to send message {i}: {e}"),
             }
         }
 
@@ -795,7 +795,7 @@ mod tests {
                     received_messages.push(buf[..size].to_vec());
                 }
                 Err(e) => {
-                    panic!("Failed to receive message: {}", e);
+                    panic!("Failed to receive message: {e}");
                 }
             }
         }
@@ -827,7 +827,7 @@ mod tests {
 
             // Basic publish test - mainly checking that it doesn't error
             if let Err(e) = publisher.publish(b"IPv6 test message") {
-                eprintln!("Note: IPv6 multicast publish failed: {}", e);
+                eprintln!("Note: IPv6 multicast publish failed: {e}");
                 // Not failing the test as IPv6 might not be properly configured
             }
         } else {
@@ -849,7 +849,7 @@ mod tests {
             }
             Err(e) => {
                 // On some systems this might fail but we don't want the test to fail
-                println!("Could not create publisher on loopback interface: {}", e);
+                println!("Could not create publisher on loopback interface: {e}");
             }
         }
 
@@ -861,10 +861,7 @@ mod tests {
             }
             Err(e) => {
                 // This should generally work on all systems, but don't fail the test
-                println!(
-                    "Could not create publisher with explicit IP 127.0.0.1: {}",
-                    e
-                );
+                println!("Could not create publisher with explicit IP 127.0.0.1: {e}");
             }
         }
 
@@ -875,7 +872,7 @@ mod tests {
                 panic!("Publisher was created with non-existent interface, should have failed");
             }
             Err(e) => {
-                println!("Expected error for non-existent interface: {}", e);
+                println!("Expected error for non-existent interface: {e}");
                 // Check that it's the correct error type - not found
                 assert!(
                     e.kind() == std::io::ErrorKind::NotFound
@@ -897,7 +894,7 @@ mod tests {
         let interface = detect_network_interface();
 
         if let Some(iface) = interface {
-            println!("Testing with detected interface: {}", iface);
+            println!("Testing with detected interface: {iface}");
 
             match MulticastPublisher::new_ipv4_with_interface(Some(port), Some(&iface)) {
                 Ok(publisher) => {
@@ -906,22 +903,16 @@ mod tests {
                     // Try to publish a message to verify basic functionality
                     match publisher.publish("Test on real interface") {
                         Ok(bytes) => {
-                            println!(
-                                "Successfully published {} bytes on interface {}",
-                                bytes, iface
-                            );
+                            println!("Successfully published {bytes} bytes on interface {iface}");
                         }
                         Err(e) => {
-                            println!("Failed to publish on interface {}: {}", iface, e);
+                            println!("Failed to publish on interface {iface}: {e}");
                             // Not failing test, as publishing might not work for various reasons
                         }
                     }
                 }
                 Err(e) => {
-                    println!(
-                        "Could not create publisher on detected interface {}: {}",
-                        iface, e
-                    );
+                    println!("Could not create publisher on detected interface {iface}: {e}");
                     // Not failing the test as the interface might not support multicast
                 }
             }
@@ -937,7 +928,7 @@ mod tests {
             use std::process::Command;
 
             // Use ip link to get interfaces, excluding loopback
-            if let Ok(output) = Command::new("ip").args(&["link", "show"]).output() {
+            if let Ok(output) = Command::new("ip").args(["link", "show"]).output() {
                 if output.status.success() {
                     let output_str = String::from_utf8_lossy(&output.stdout);
 

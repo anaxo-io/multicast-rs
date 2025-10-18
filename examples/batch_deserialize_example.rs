@@ -41,15 +41,14 @@ fn main() {
     let mut subscriber = match MulticastSubscriber::new_str("224.0.0.123", None, None) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Error creating subscriber: {}", e);
+            eprintln!("Error creating subscriber: {e}");
             return;
         }
     };
 
     println!("Listening on {} for messages...", subscriber.address());
     println!(
-        "Will process batches of up to {} messages with {}ms max processing time",
-        batch_size, max_time_ms
+        "Will process batches of up to {batch_size} messages with {max_time_ms}ms max processing time"
     );
 
     // Create a buffer to receive deserialized TradeMessage objects
@@ -65,7 +64,7 @@ fn main() {
         // Wait for messages and deserialize them into the buffer
         match subscriber.receive_batch(&mut trade_buffer, Some(max_time_ns)) {
             Ok(count) => {
-                println!("Received and deserialized {} messages:", count);
+                println!("Received and deserialized {count} messages:");
 
                 // Print the deserialized messages
                 for i in 0..count {
@@ -86,12 +85,12 @@ fn main() {
             }
             Err(e) if e.kind() == io::ErrorKind::InvalidData => {
                 // Deserialization error
-                eprintln!("Error deserializing message: {}", e);
+                eprintln!("Error deserializing message: {e}");
                 // Sleep a bit to avoid tight loop on errors
                 std::thread::sleep(Duration::from_millis(100));
             }
             Err(e) => {
-                eprintln!("Error receiving messages: {}", e);
+                eprintln!("Error receiving messages: {e}");
                 // Sleep a bit to avoid tight loop on errors
                 std::thread::sleep(Duration::from_millis(100));
             }

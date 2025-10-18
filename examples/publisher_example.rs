@@ -24,7 +24,7 @@ fn main() {
     let publisher = match MulticastPublisher::new_str("224.0.0.123", None) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("Error creating publisher: {}", e);
+            eprintln!("Error creating publisher: {e}");
             return;
         }
     };
@@ -35,10 +35,10 @@ fn main() {
     match publisher.publish_and_receive(message, Some(Duration::from_secs(2))) {
         Ok((data, addr)) => {
             let data_str = String::from_utf8_lossy(&data);
-            println!("Received response from {}: {}", addr, data_str);
+            println!("Received response from {addr}: {data_str}");
         }
         Err(e) => {
-            println!("No response received: {}", e);
+            println!("No response received: {e}");
         }
     }
 }

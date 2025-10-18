@@ -72,13 +72,13 @@ fn get_interface_ip(interface_name: &str, want_ipv4: bool) -> io::Result<Option<
         // This is a simplistic approach - we run 'ip addr' command and parse it
         // In production code, you'd want to use a proper network interface library
         let output = Command::new("ip")
-            .args(&["addr", "show", "dev", interface_name])
+            .args(["addr", "show", "dev", interface_name])
             .output()?;
 
         if !output.status.success() {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
-                format!("Interface {} not found", interface_name),
+                format!("Interface {interface_name} not found"),
             ));
         }
 
@@ -124,11 +124,11 @@ fn get_interface_ip(interface_name: &str, want_ipv4: bool) -> io::Result<Option<
         }
 
         // Return the appropriate IP address type based on what was requested
-        return Ok(if want_ipv4 {
+        Ok(if want_ipv4 {
             ipv4_addr
         } else {
             ipv6_addr.or(ipv4_addr)
-        });
+        })
     }
 
     #[cfg(not(target_family = "unix"))]
@@ -190,7 +190,7 @@ fn join_multicast(addr: SocketAddr, interface: Option<&str>) -> io::Result<UdpSo
                     {
                         // Try to get interface index
                         let output = std::process::Command::new("ip")
-                            .args(&["link", "show", "dev", iface])
+                            .args(["link", "show", "dev", iface])
                             .output()?;
 
                         if output.status.success() {
@@ -257,7 +257,7 @@ fn new_sender(addr: &SocketAddr, interface: Option<&str>) -> io::Result<UdpSocke
                 {
                     // Try to get interface index - same naive approach as above
                     let output = std::process::Command::new("ip")
-                        .args(&["link", "show", "dev", iface])
+                        .args(["link", "show", "dev", iface])
                         .output()?;
 
                     if output.status.success() {

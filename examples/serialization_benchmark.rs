@@ -41,11 +41,8 @@ fn main() {
     let benchmark_port = 7646; // Using separate port to avoid conflicts
 
     println!("======= Multicast Serialization Format Benchmark =======");
-    println!("Comparing JSON vs Bincode for {} messages", message_count);
-    println!(
-        "Using multicast address: {}:{}",
-        benchmark_ip, benchmark_port
-    );
+    println!("Comparing JSON vs Bincode for {message_count} messages");
+    println!("Using multicast address: {benchmark_ip}:{benchmark_port}");
     println!();
 
     // Create sample market data
@@ -117,16 +114,14 @@ fn benchmark_serialization(data: &[MarketDataUpdate]) {
 
     // Benchmark Bincode serialization for a single record
     let start = Instant::now();
-    let bincode = bincode::serialize(single_record).unwrap();
+    let bincode =
+        bincode::serde::encode_to_vec(single_record, bincode::config::standard()).unwrap();
     let bincode_single_time = start.elapsed();
     let bincode_size = bincode.len();
 
     println!("Single record serialization:");
-    println!("  JSON:    {:?} ({} bytes)", json_single_time, json_size);
-    println!(
-        "  Bincode: {:?} ({} bytes)",
-        bincode_single_time, bincode_size
-    );
+    println!("  JSON:    {json_single_time:?} ({json_size} bytes)");
+    println!("  Bincode: {bincode_single_time:?} ({bincode_size} bytes)");
     println!(
         "  Size reduction with Bincode: {:.1}%",
         100.0 * (json_size - bincode_size) as f64 / json_size as f64
@@ -153,7 +148,7 @@ fn benchmark_serialization(data: &[MarketDataUpdate]) {
     let start = Instant::now();
     let mut bincode_total_size = 0;
     for record in data {
-        let bincode = bincode::serialize(record).unwrap();
+        let bincode = bincode::serde::encode_to_vec(record, bincode::config::standard()).unwrap();
         bincode_total_size += bincode.len();
     }
     let bincode_batch_time = start.elapsed();
@@ -198,7 +193,7 @@ fn benchmark_multicast(ip: &str, port: u16, data: &[MarketDataUpdate]) {
                 }
             }
             let send_time = send_start.elapsed();
-            println!("  Sent 1000 JSON messages in: {:?}", send_time);
+            println!("  Sent 1000 JSON messages in: {send_time:?}");
 
             // Time to receive and deserialize
             let receive_start = Instant::now();
@@ -211,10 +206,7 @@ fn benchmark_multicast(ip: &str, port: u16, data: &[MarketDataUpdate]) {
             ) {
                 Ok(count) => {
                     let receive_time = receive_start.elapsed();
-                    println!(
-                        "  Received and deserialized {} messages in: {:?}",
-                        count, receive_time
-                    );
+                    println!("  Received and deserialized {count} messages in: {receive_time:?}");
                     if count > 0 {
                         println!(
                             "  Average JSON round-trip time per message: {:?}",
@@ -223,7 +215,7 @@ fn benchmark_multicast(ip: &str, port: u16, data: &[MarketDataUpdate]) {
                     }
                 }
                 Err(e) => {
-                    println!("  Error receiving JSON messages: {}", e);
+                    println!("  Error receiving JSON messages: {e}");
                 }
             }
         }
@@ -243,12 +235,14 @@ fn benchmark_multicast(ip: &str, port: u16, data: &[MarketDataUpdate]) {
             // Time to send all messages with Bincode
             let send_start = Instant::now();
             for record in sample_data {
-                if let Ok(binary) = bincode::serialize(record) {
+                if let Ok(binary) =
+                    bincode::serde::encode_to_vec(record, bincode::config::standard())
+                {
                     let _ = publisher.publish(&binary);
                 }
             }
             let send_time = send_start.elapsed();
-            println!("  Sent 1000 Bincode messages in: {:?}", send_time);
+            println!("  Sent 1000 Bincode messages in: {send_time:?}");
 
             // Time to receive and deserialize
             let receive_start = Instant::now();
@@ -261,10 +255,7 @@ fn benchmark_multicast(ip: &str, port: u16, data: &[MarketDataUpdate]) {
             ) {
                 Ok(count) => {
                     let receive_time = receive_start.elapsed();
-                    println!(
-                        "  Received and deserialized {} messages in: {:?}",
-                        count, receive_time
-                    );
+                    println!("  Received and deserialized {count} messages in: {receive_time:?}");
                     if count > 0 {
                         println!(
                             "  Average Bincode round-trip time per message: {:?}",
@@ -273,7 +264,7 @@ fn benchmark_multicast(ip: &str, port: u16, data: &[MarketDataUpdate]) {
                     }
                 }
                 Err(e) => {
-                    println!("  Error receiving Bincode messages: {}", e);
+                    println!("  Error receiving Bincode messages: {e}");
                 }
             }
         }
