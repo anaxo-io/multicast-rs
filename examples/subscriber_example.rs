@@ -25,13 +25,13 @@ fn main() {
     let subscriber = match MulticastSubscriber::new_str("224.0.0.123", None, None) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Error creating subscriber: {}", e);
+            eprintln!("Error creating subscriber: {e}");
             return;
         }
     };
 
     println!("Listening on {} for messages...", subscriber.address());
-    println!("Will respond with: \"{}\"", response);
+    println!("Will respond with: \"{response}\"");
 
     // Continuously listen for messages until ctrl+c
     loop {
@@ -41,15 +41,15 @@ fn main() {
         match subscriber.receive_and_respond(None, response) {
             Ok((data, addr)) => {
                 let data_str = String::from_utf8_lossy(&data);
-                println!("Received message from {}: \"{}\"", addr, data_str);
-                println!("Sent response: \"{}\"", response);
+                println!("Received message from {addr}: \"{data_str}\"");
+                println!("Sent response: \"{response}\"");
             }
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                 // Timeout occurred, just continue
                 println!("Timeout waiting for message, continuing...");
             }
             Err(e) => {
-                eprintln!("Error receiving message: {}", e);
+                eprintln!("Error receiving message: {e}");
                 // Sleep a bit to avoid tight loop on errors
                 std::thread::sleep(Duration::from_millis(100));
             }

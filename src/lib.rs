@@ -72,13 +72,13 @@ fn get_interface_ip(interface_name: &str, want_ipv4: bool) -> io::Result<Option<
         // This is a simplistic approach - we run 'ip addr' command and parse it
         // In production code, you'd want to use a proper network interface library
         let output = Command::new("ip")
-            .args(&["addr", "show", "dev", interface_name])
+            .args(["addr", "show", "dev", interface_name])
             .output()?;
 
         if !output.status.success() {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
-                format!("Interface {} not found", interface_name),
+                format!("Interface {interface_name} not found"),
             ));
         }
 
@@ -96,10 +96,10 @@ fn get_interface_ip(interface_name: &str, want_ipv4: bool) -> io::Result<Option<
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() >= 2 {
                     let addr_with_prefix = parts[1];
-                    if let Some(ip_str) = addr_with_prefix.split('/').next() {
-                        if let Ok(addr) = ip_str.parse::<Ipv4Addr>() {
-                            ipv4_addr = Some(IpAddr::V4(addr));
-                        }
+                    if let Some(ip_str) = addr_with_prefix.split('/').next()
+                        && let Ok(addr) = ip_str.parse::<Ipv4Addr>()
+                    {
+                        ipv4_addr = Some(IpAddr::V4(addr));
                     }
                 }
             }
@@ -109,14 +109,12 @@ fn get_interface_ip(interface_name: &str, want_ipv4: bool) -> io::Result<Option<
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() >= 2 {
                     let addr_with_prefix = parts[1];
-                    if let Some(ip_str) = addr_with_prefix.split('/').next() {
-                        if let Ok(addr) = ip_str.parse::<Ipv6Addr>() {
-                            // Skip link-local addresses unless they're explicitly requested
-                            if !addr.is_unicast_link_local()
-                                || interface_name.contains("link-local")
-                            {
-                                ipv6_addr = Some(IpAddr::V6(addr));
-                            }
+                    if let Some(ip_str) = addr_with_prefix.split('/').next()
+                        && let Ok(addr) = ip_str.parse::<Ipv6Addr>()
+                    {
+                        // Skip link-local addresses unless they're explicitly requested
+                        if !addr.is_unicast_link_local() || interface_name.contains("link-local") {
+                            ipv6_addr = Some(IpAddr::V6(addr));
                         }
                     }
                 }
@@ -124,11 +122,11 @@ fn get_interface_ip(interface_name: &str, want_ipv4: bool) -> io::Result<Option<
         }
 
         // Return the appropriate IP address type based on what was requested
-        return Ok(if want_ipv4 {
+        Ok(if want_ipv4 {
             ipv4_addr
         } else {
             ipv6_addr.or(ipv4_addr)
-        });
+        })
     }
 
     #[cfg(not(target_family = "unix"))]
@@ -190,7 +188,7 @@ fn join_multicast(addr: SocketAddr, interface: Option<&str>) -> io::Result<UdpSo
                     {
                         // Try to get interface index
                         let output = std::process::Command::new("ip")
-                            .args(&["link", "show", "dev", iface])
+                            .args(["link", "show", "dev", iface])
                             .output()?;
 
                         if output.status.success() {
@@ -198,11 +196,7 @@ fn join_multicast(addr: SocketAddr, interface: Option<&str>) -> io::Result<UdpSo
                             let output_str = String::from_utf8_lossy(&output.stdout);
                             if let Some(first_line) = output_str.lines().next() {
                                 if let Some(idx_str) = first_line.split(':').next() {
-                                    if let Ok(idx) = idx_str.trim().parse::<u32>() {
-                                        idx
-                                    } else {
-                                        0 // Default to all interfaces
-                                    }
+                                    idx_str.trim().parse::<u32>().unwrap_or_default()
                                 } else {
                                     0
                                 }
@@ -257,18 +251,14 @@ fn new_sender(addr: &SocketAddr, interface: Option<&str>) -> io::Result<UdpSocke
                 {
                     // Try to get interface index - same naive approach as above
                     let output = std::process::Command::new("ip")
-                        .args(&["link", "show", "dev", iface])
+                        .args(["link", "show", "dev", iface])
                         .output()?;
 
                     if output.status.success() {
                         let output_str = String::from_utf8_lossy(&output.stdout);
                         if let Some(first_line) = output_str.lines().next() {
                             if let Some(idx_str) = first_line.split(':').next() {
-                                if let Ok(idx) = idx_str.trim().parse::<u32>() {
-                                    idx
-                                } else {
-                                    0 // Default
-                                }
+                                idx_str.trim().parse::<u32>().unwrap_or_default()
                             } else {
                                 0
                             }
