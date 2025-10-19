@@ -43,18 +43,5 @@ jobs:
     steps:
       - uses: googleapis/release-please-action@v4
         with:
-          token: ${{ secrets.MY_RELEASE_PLEASE_TOKEN }}
+          token: ${{ secrets.MULTICAST_ORG_RELEASE_PLEASE_TOKEN }}
           release-type: rust
-          package-name: multicast-rs
-          bump-minor-pre-major: true
-          bump-patch-for-minor-pre-major: false
-          changelog-types: >
-            [
-              {"type": "feat", "section": "Features", "hidden": false},
-              {"type": "fix", "section": "Bug Fixes", "hidden": false},
-              {"type": "docs", "section": "Documentation", "hidden": false},
-              {"type": "refactor", "section": "Refactoring", "hidden": false},
-              {"type": "test", "section": "Tests", "hidden": false},
-              {"type": "chore", "section": "Miscellaneous", "hidden": false},
-              {"type": "perf", "section": "Performance Improvements", "hidden": false}
-            ]
