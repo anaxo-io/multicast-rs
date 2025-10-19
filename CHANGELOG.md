@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1](https://github.com/anaxo-io/multicast-rs/compare/v1.2.0...v1.2.1) (2025-10-19)
+
+
+### Bug Fixes
+
+* all clippy warnings with -D warnings flag ([d44c9c7](https://github.com/anaxo-io/multicast-rs/commit/d44c9c79520983537884706e69bfe0f4a9291e93))
+* **ci:** add permissions for release-please job ([77f12c7](https://github.com/anaxo-io/multicast-rs/commit/77f12c736dd6e933c8baad79e2eb8a19fe960a22))
+* **ci:** add rustfmt component to CI workflow ([45c9bf6](https://github.com/anaxo-io/multicast-rs/commit/45c9bf6580cef9919aa27b566ebfa3fac2704967))
+* **ci:** update release-please action token ([910fbd2](https://github.com/anaxo-io/multicast-rs/commit/910fbd2b8990b2b32333743f4dd2d72176b69bce))
+* **ci:** update release-please action token ([f425a10](https://github.com/anaxo-io/multicast-rs/commit/f425a109adc5bf0401f2bd31872ad7a64019efe1))
+* **ci:** use GITHUB_TOKEN for release-please action ([b582dda](https://github.com/anaxo-io/multicast-rs/commit/b582dda759b4913c69a488c2fd784e02bd643158))
+* **release:** update release token and configuration ([71e6e77](https://github.com/anaxo-io/multicast-rs/commit/71e6e777f3c08683740f8aaa6b8f779aefa376cc))
+* update bincode to version 2.x ([9735657](https://github.com/anaxo-io/multicast-rs/commit/9735657c0098219a621391761e9dd3ba4b7114d0))
+* update bincode to version 2.x ([00eb008](https://github.com/anaxo-io/multicast-rs/commit/00eb0086e9a343fc1a4f386974ea8af6cf03e092))
+
 ## [1.2.0](https://github.com/hmedkouri/multicast-rs/compare/v1.1.1...v1.2.0) (2025-05-17)
 
 
