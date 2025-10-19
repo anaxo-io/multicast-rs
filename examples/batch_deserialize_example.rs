@@ -67,8 +67,7 @@ fn main() {
                 println!("Received and deserialized {count} messages:");
 
                 // Print the deserialized messages
-                for i in 0..count {
-                    let trade = &trade_buffer[i];
+                for (i, trade) in trade_buffer.iter().take(count).enumerate() {
                     println!(
                         "  {}: {} @ ${:.2} x {} (timestamp: {})",
                         i + 1,

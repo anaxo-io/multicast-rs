@@ -402,7 +402,7 @@ impl MulticastPublisher {
 
         #[cfg(not(feature = "stats"))]
         {
-            self.socket.send_to(message.as_ref(), &self.addr)
+            self.socket.send_to(message.as_ref(), self.addr)
         }
     }
 
@@ -507,10 +507,10 @@ impl MulticastPublisher {
             results.push(result);
 
             // Add delay between messages if specified
-            if let Some(delay) = delay_between_messages_ms {
-                if delay > 0 {
-                    std::thread::sleep(Duration::from_millis(delay));
-                }
+            if let Some(delay) = delay_between_messages_ms
+                && delay > 0
+            {
+                std::thread::sleep(Duration::from_millis(delay));
             }
         }
 
@@ -928,19 +928,19 @@ mod tests {
             use std::process::Command;
 
             // Use ip link to get interfaces, excluding loopback
-            if let Ok(output) = Command::new("ip").args(["link", "show"]).output() {
-                if output.status.success() {
-                    let output_str = String::from_utf8_lossy(&output.stdout);
+            if let Ok(output) = Command::new("ip").args(["link", "show"]).output()
+                && output.status.success()
+            {
+                let output_str = String::from_utf8_lossy(&output.stdout);
 
-                    // Very naive parsing - in production code use proper APIs
-                    for line in output_str.lines() {
-                        if line.contains(": ") && !line.contains("lo:") {
-                            // Extract interface name
-                            if let Some(iface_with_num) = line.split(": ").nth(1) {
-                                if let Some(iface) = iface_with_num.split(':').next() {
-                                    return Some(iface.to_string());
-                                }
-                            }
+                // Very naive parsing - in production code use proper APIs
+                for line in output_str.lines() {
+                    if line.contains(": ") && !line.contains("lo:") {
+                        // Extract interface name
+                        if let Some(iface_with_num) = line.split(": ").nth(1)
+                            && let Some(iface) = iface_with_num.split(':').next()
+                        {
+                            return Some(iface.to_string());
                         }
                     }
                 }

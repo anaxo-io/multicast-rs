@@ -17,17 +17,21 @@ jobs:
   fmt:
     name: Format
     runs-on: ubuntu-latest
+    container:
+      image: rust:1-slim-bookworm
     steps:
-      - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rustfmt
+      - uses: actions/checkout@v4
+#      - uses: dtolnay/rust-toolchain@nightly
+#        with:
+#          components: rustfmt
       - run: cargo fmt --all --check
       
   build:
     runs-on: ubuntu-latest
+    container:
+      image: rust:1-slim-bookworm
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Build
       run: cargo build --verbose
     - name: Run tests

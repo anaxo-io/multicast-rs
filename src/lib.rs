@@ -96,10 +96,10 @@ fn get_interface_ip(interface_name: &str, want_ipv4: bool) -> io::Result<Option<
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() >= 2 {
                     let addr_with_prefix = parts[1];
-                    if let Some(ip_str) = addr_with_prefix.split('/').next() {
-                        if let Ok(addr) = ip_str.parse::<Ipv4Addr>() {
-                            ipv4_addr = Some(IpAddr::V4(addr));
-                        }
+                    if let Some(ip_str) = addr_with_prefix.split('/').next()
+                        && let Ok(addr) = ip_str.parse::<Ipv4Addr>()
+                    {
+                        ipv4_addr = Some(IpAddr::V4(addr));
                     }
                 }
             }
@@ -109,14 +109,12 @@ fn get_interface_ip(interface_name: &str, want_ipv4: bool) -> io::Result<Option<
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() >= 2 {
                     let addr_with_prefix = parts[1];
-                    if let Some(ip_str) = addr_with_prefix.split('/').next() {
-                        if let Ok(addr) = ip_str.parse::<Ipv6Addr>() {
-                            // Skip link-local addresses unless they're explicitly requested
-                            if !addr.is_unicast_link_local()
-                                || interface_name.contains("link-local")
-                            {
-                                ipv6_addr = Some(IpAddr::V6(addr));
-                            }
+                    if let Some(ip_str) = addr_with_prefix.split('/').next()
+                        && let Ok(addr) = ip_str.parse::<Ipv6Addr>()
+                    {
+                        // Skip link-local addresses unless they're explicitly requested
+                        if !addr.is_unicast_link_local() || interface_name.contains("link-local") {
+                            ipv6_addr = Some(IpAddr::V6(addr));
                         }
                     }
                 }
@@ -198,11 +196,7 @@ fn join_multicast(addr: SocketAddr, interface: Option<&str>) -> io::Result<UdpSo
                             let output_str = String::from_utf8_lossy(&output.stdout);
                             if let Some(first_line) = output_str.lines().next() {
                                 if let Some(idx_str) = first_line.split(':').next() {
-                                    if let Ok(idx) = idx_str.trim().parse::<u32>() {
-                                        idx
-                                    } else {
-                                        0 // Default to all interfaces
-                                    }
+                                    idx_str.trim().parse::<u32>().unwrap_or_default()
                                 } else {
                                     0
                                 }
@@ -264,11 +258,7 @@ fn new_sender(addr: &SocketAddr, interface: Option<&str>) -> io::Result<UdpSocke
                         let output_str = String::from_utf8_lossy(&output.stdout);
                         if let Some(first_line) = output_str.lines().next() {
                             if let Some(idx_str) = first_line.split(':').next() {
-                                if let Ok(idx) = idx_str.trim().parse::<u32>() {
-                                    idx
-                                } else {
-                                    0 // Default
-                                }
+                                idx_str.trim().parse::<u32>().unwrap_or_default()
                             } else {
                                 0
                             }

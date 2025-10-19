@@ -196,6 +196,7 @@ pub struct BackgroundSubscriber {
 
     #[cfg(feature = "stats")]
     /// Message count for statistics
+    #[allow(dead_code)]
     stats_message_count: Arc<AtomicU64>,
 
     #[cfg(feature = "stats")]
@@ -915,8 +916,8 @@ impl MulticastSubscriber {
 
         let mut processed = 0;
         // Process each received message with the handler
-        for i in 0..received {
-            handler(&buffer[i], addr)?;
+        for item in buffer.iter().take(received) {
+            handler(item, addr)?;
             processed += 1;
         }
 
@@ -1438,10 +1439,10 @@ impl BackgroundSubscriber {
     /// ```
     pub fn stop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
-        if let Some(handle) = self.join_handle.take() {
-            if let Err(e) = handle.join() {
-                eprintln!("Error joining multicast listener thread: {e:?}");
-            }
+        if let Some(handle) = self.join_handle.take()
+            && let Err(e) = handle.join()
+        {
+            eprintln!("Error joining multicast listener thread: {e:?}");
         }
     }
 
@@ -2117,19 +2118,19 @@ mod tests {
             use std::process::Command;
 
             // Use ip link to get interfaces, excluding loopback
-            if let Ok(output) = Command::new("ip").args(["link", "show"]).output() {
-                if output.status.success() {
-                    let output_str = String::from_utf8_lossy(&output.stdout);
+            if let Ok(output) = Command::new("ip").args(["link", "show"]).output()
+                && output.status.success()
+            {
+                let output_str = String::from_utf8_lossy(&output.stdout);
 
-                    // Very naive parsing - in production code use proper APIs
-                    for line in output_str.lines() {
-                        if line.contains(": ") && !line.contains("lo:") {
-                            // Extract interface name
-                            if let Some(iface_with_num) = line.split(": ").nth(1) {
-                                if let Some(iface) = iface_with_num.split(':').next() {
-                                    return Some(iface.to_string());
-                                }
-                            }
+                // Very naive parsing - in production code use proper APIs
+                for line in output_str.lines() {
+                    if line.contains(": ") && !line.contains("lo:") {
+                        // Extract interface name
+                        if let Some(iface_with_num) = line.split(": ").nth(1)
+                            && let Some(iface) = iface_with_num.split(':').next()
+                        {
+                            return Some(iface.to_string());
                         }
                     }
                 }
@@ -2458,6 +2459,7 @@ mod tests {
         use serde::{Deserialize, Serialize};
 
         #[derive(Serialize, Deserialize, Debug, Default)]
+        #[allow(dead_code)]
         struct TestStruct {
             field1: String,
             field2: i32,

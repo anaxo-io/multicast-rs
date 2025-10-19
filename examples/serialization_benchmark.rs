@@ -178,45 +178,45 @@ fn benchmark_multicast(ip: &str, port: u16, data: &[MarketDataUpdate]) {
     let sample_data = &data[0..1000]; // Use first 1000 records for this test
 
     // JSON round-trip test
-    if let Ok(publisher) = MulticastPublisher::new_str(ip, Some(port)) {
-        if let Ok(mut subscriber) = MulticastSubscriber::new_str(ip, Some(port), Some(8192)) {
-            println!("\nTesting JSON format round-trip:");
+    if let Ok(publisher) = MulticastPublisher::new_str(ip, Some(port))
+        && let Ok(mut subscriber) = MulticastSubscriber::new_str(ip, Some(port), Some(8192))
+    {
+        println!("\nTesting JSON format round-trip:");
 
-            // Create buffer for received messages
-            let mut received = vec![MarketDataUpdate::default(); 1000];
+        // Create buffer for received messages
+        let mut received = vec![MarketDataUpdate::default(); 1000];
 
-            // Time to send all messages with JSON
-            let send_start = Instant::now();
-            for record in sample_data {
-                if let Ok(json) = serde_json::to_string(record) {
-                    let _ = publisher.publish(&json);
+        // Time to send all messages with JSON
+        let send_start = Instant::now();
+        for record in sample_data {
+            if let Ok(json) = serde_json::to_string(record) {
+                let _ = publisher.publish(&json);
+            }
+        }
+        let send_time = send_start.elapsed();
+        println!("  Sent 1000 JSON messages in: {send_time:?}");
+
+        // Time to receive and deserialize
+        let receive_start = Instant::now();
+        let max_wait_ns = 3_000_000_000; // 3 seconds max wait
+
+        match subscriber.receive_batch_with_format(
+            &mut received,
+            Some(max_wait_ns),
+            DeserializeFormat::Json,
+        ) {
+            Ok(count) => {
+                let receive_time = receive_start.elapsed();
+                println!("  Received and deserialized {count} messages in: {receive_time:?}");
+                if count > 0 {
+                    println!(
+                        "  Average JSON round-trip time per message: {:?}",
+                        receive_time / count as u32
+                    );
                 }
             }
-            let send_time = send_start.elapsed();
-            println!("  Sent 1000 JSON messages in: {send_time:?}");
-
-            // Time to receive and deserialize
-            let receive_start = Instant::now();
-            let max_wait_ns = 3_000_000_000; // 3 seconds max wait
-
-            match subscriber.receive_batch_with_format(
-                &mut received,
-                Some(max_wait_ns),
-                DeserializeFormat::Json,
-            ) {
-                Ok(count) => {
-                    let receive_time = receive_start.elapsed();
-                    println!("  Received and deserialized {count} messages in: {receive_time:?}");
-                    if count > 0 {
-                        println!(
-                            "  Average JSON round-trip time per message: {:?}",
-                            receive_time / count as u32
-                        );
-                    }
-                }
-                Err(e) => {
-                    println!("  Error receiving JSON messages: {e}");
-                }
+            Err(e) => {
+                println!("  Error receiving JSON messages: {e}");
             }
         }
     }
@@ -225,47 +225,45 @@ fn benchmark_multicast(ip: &str, port: u16, data: &[MarketDataUpdate]) {
     std::thread::sleep(Duration::from_millis(1000));
 
     // Bincode round-trip test
-    if let Ok(publisher) = MulticastPublisher::new_str(ip, Some(port + 1)) {
-        if let Ok(mut subscriber) = MulticastSubscriber::new_str(ip, Some(port + 1), Some(8192)) {
-            println!("\nTesting Bincode format round-trip:");
+    if let Ok(publisher) = MulticastPublisher::new_str(ip, Some(port + 1))
+        && let Ok(mut subscriber) = MulticastSubscriber::new_str(ip, Some(port + 1), Some(8192))
+    {
+        println!("\nTesting Bincode format round-trip:");
 
-            // Create buffer for received messages
-            let mut received = vec![MarketDataUpdate::default(); 1000];
+        // Create buffer for received messages
+        let mut received = vec![MarketDataUpdate::default(); 1000];
 
-            // Time to send all messages with Bincode
-            let send_start = Instant::now();
-            for record in sample_data {
-                if let Ok(binary) =
-                    bincode::serde::encode_to_vec(record, bincode::config::standard())
-                {
-                    let _ = publisher.publish(&binary);
+        // Time to send all messages with Bincode
+        let send_start = Instant::now();
+        for record in sample_data {
+            if let Ok(binary) = bincode::serde::encode_to_vec(record, bincode::config::standard()) {
+                let _ = publisher.publish(&binary);
+            }
+        }
+        let send_time = send_start.elapsed();
+        println!("  Sent 1000 Bincode messages in: {send_time:?}");
+
+        // Time to receive and deserialize
+        let receive_start = Instant::now();
+        let max_wait_ns = 3_000_000_000; // 3 seconds max wait
+
+        match subscriber.receive_batch_with_format(
+            &mut received,
+            Some(max_wait_ns),
+            DeserializeFormat::Bincode,
+        ) {
+            Ok(count) => {
+                let receive_time = receive_start.elapsed();
+                println!("  Received and deserialized {count} messages in: {receive_time:?}");
+                if count > 0 {
+                    println!(
+                        "  Average Bincode round-trip time per message: {:?}",
+                        receive_time / count as u32
+                    );
                 }
             }
-            let send_time = send_start.elapsed();
-            println!("  Sent 1000 Bincode messages in: {send_time:?}");
-
-            // Time to receive and deserialize
-            let receive_start = Instant::now();
-            let max_wait_ns = 3_000_000_000; // 3 seconds max wait
-
-            match subscriber.receive_batch_with_format(
-                &mut received,
-                Some(max_wait_ns),
-                DeserializeFormat::Bincode,
-            ) {
-                Ok(count) => {
-                    let receive_time = receive_start.elapsed();
-                    println!("  Received and deserialized {count} messages in: {receive_time:?}");
-                    if count > 0 {
-                        println!(
-                            "  Average Bincode round-trip time per message: {:?}",
-                            receive_time / count as u32
-                        );
-                    }
-                }
-                Err(e) => {
-                    println!("  Error receiving Bincode messages: {e}");
-                }
+            Err(e) => {
+                println!("  Error receiving Bincode messages: {e}");
             }
         }
     }
